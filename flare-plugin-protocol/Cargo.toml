@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.94.0"
 license = "Apache-2.0"
 description = "Business-neutral Flare plugin manifests, registry, grants and lifecycle contracts"
-repository = "https://github.com/flare-im/flare-proto"
+repository = "https://github.com/flare-im/flare-protocol"
 
 [dependencies]
 base64 = "0.22"

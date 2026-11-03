@@ -291,7 +291,7 @@ Improve the contract by ensuring:
 
 ### Alternative A: Minimal Patch
 
-Only fix downstream compile drift by updating `flare-im-core/src/message/convert.rs` to current burn fields.
+Only fix downstream compile drift by updating `flare-core-server/src/message/convert.rs` to current burn fields.
 
 Why not:
 
