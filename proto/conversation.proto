@@ -72,6 +72,8 @@ message ConversationSummary {
   string draft = 22;
   /// 当前用户的历史可见边界：conversation_seq <= visible_after_conversation_seq 的消息不可见。
   uint64 visible_after_conversation_seq = 23;
+  /// Only play alerts for messages that mention the current user. Older servers omit this field.
+  optional bool is_mention_only = 24;
   map<string, string> attributes = 50;
 }
 
@@ -88,6 +90,8 @@ message ConversationUserSettings {
   // 与 is_muted 正交：muted 是「一条都别响」，mention_only 是「只有点名才响」。
   // 合并成一个枚举会让老客户端的 is_muted 无处安放，所以保持两个布尔。
   bool is_mention_only = 7;
+  // Account-wide history cutoff (inclusive). Absent on older servers.
+  optional uint64 history_cleared_through_seq = 8;
 }
 
 message ConversationParticipant {

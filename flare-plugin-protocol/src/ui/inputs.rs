@@ -31,6 +31,8 @@ pub const SELECT_MAX_CHOICES: usize = 1024;
 pub enum UiInputKind {
     /// One line of text; value is a string.
     Text,
+    /// Secret text: no default, data binding or durable page command.
+    Password,
     /// Multi-line text; value is a string (newlines allowed).
     Textarea,
     /// Value is a JSON number within `min..=max`.
@@ -170,7 +172,7 @@ impl UiInput {
     pub(crate) fn validate(&self) -> Result<()> {
         use UiInputKind::*;
         let invalid = Err(ProtocolError::Denied("invalid UI input"));
-        let text_like = matches!(self.kind, Text | Textarea | Options);
+        let text_like = matches!(self.kind, Text | Password | Textarea | Options);
         let ranged = matches!(self.kind, Number | Options | Members);
         if !valid_name(&self.id)
             || !valid_text(&self.label)
@@ -180,6 +182,7 @@ impl UiInput {
                 .max_path
                 .as_deref()
                 .is_some_and(|p| !valid_path(p) || !matches!(self.kind, Options | Members))
+            || (self.kind == Password && (self.default.is_some() || self.default_path.is_some()))
             || (self.required && self.kind == Toggle)
             || (self.max_length.is_some() && !text_like)
             || ((self.min.is_some() || self.max.is_some()) && !ranged)
@@ -194,7 +197,7 @@ impl UiInput {
         }
         if let Some(max_length) = self.max_length {
             let cap = match self.kind {
-                Text => TEXT_MAX_LENGTH,
+                Text | Password => TEXT_MAX_LENGTH,
                 Textarea => TEXTAREA_MAX_LENGTH,
                 _ => OPTION_MAX_LENGTH,
             };
@@ -361,8 +364,8 @@ impl UiInput {
         use UiInputKind::*;
         let max = self.effective_max_length() as usize;
         match (self.kind, value) {
-            (Text | Textarea, Value::String(s)) => {
-                let shape_ok = if self.kind == Text {
+            (Text | Password | Textarea, Value::String(s)) => {
+                let shape_ok = if matches!(self.kind, Text | Password) {
                     single_line(s)
                 } else {
                     multi_line(s)

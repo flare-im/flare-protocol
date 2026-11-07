@@ -143,6 +143,8 @@ message ConversationUpdateEvent {
   string title = 2;  // 会话标题（群名等）
   string avatar = 3;  // 会话头像 URL
   int32 unread_count = 4;  // 未读数（可选，由服务维护）
+  // Optional participant-visible cutoff from an authenticated conversation clear.
+  optional uint64 history_cleared_through_seq = 5;
 }
 
 message ConversationDeleteEvent {

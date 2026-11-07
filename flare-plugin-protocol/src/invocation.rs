@@ -146,6 +146,9 @@ pub struct PluginStaffCallClaims {
     /// The staff member's organization; `None` for platform staff.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub org_id: Option<String>,
+    /// Explicit management authority, separate from the employee's organization membership.
+    #[serde(default, skip_serializing_if = "PluginAdminScope::is_application")]
+    pub scope: PluginAdminScope,
     /// `plugin:<pluginId>:<permission>` of this ticket's plugin
     /// ([`plugin_permission`]).
     pub permission: String,
@@ -158,6 +161,32 @@ pub struct PluginStaffCallClaims {
     pub reason: Option<String>,
     pub issued_at_ms: i64,
     pub expires_at_ms: i64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum PluginAdminScope {
+    #[default]
+    Application,
+    Organization {
+        organization_id: String,
+    },
+}
+impl PluginAdminScope {
+    pub fn is_application(&self) -> bool {
+        matches!(self, Self::Application)
+    }
+    pub fn organization_id(&self) -> Option<&str> {
+        match self {
+            Self::Application => None,
+            Self::Organization { organization_id } => Some(organization_id),
+        }
+    }
 }
 /// Whether `reason` is a stated reason a staff ticket may carry: not blank, at
 /// most [`MAX_STAFF_REASON_BYTES`] bytes, no control characters.
@@ -180,6 +209,9 @@ impl PluginStaffCallClaims {
         ]) || self.tenant_id == "*"
             || self.grant_revision == 0
             || self.org_id.as_deref().is_some_and(|id| !bounded_ids(&[id]))
+            || self.scope.organization_id().is_some_and(|id| {
+                !bounded_ids(&[id]) || self.org_id.as_deref().is_some_and(|member| member != id)
+            })
             || self
                 .reason
                 .as_deref()

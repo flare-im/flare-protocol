@@ -7,6 +7,10 @@
 
 ### 新增
 
+- `schemas/` 增加接入清单、发布清单、在线密钥证书、密钥状态文档的 JSON Schema
+  （`access_manifest.v1`、`release_manifest.v1`、`keycert.v1`、`keystate.v1`）。
+  真源是 `flare-access` 的 Rust 类型，由它的 `json_schemas` 测试生成并校验。
+
 - `PushPayloadKind` 增加 `PUSH_PAYLOAD_KIND_CAPABILITY = 5`，`PushEnvelope.payload` 增加
   `CapabilityPacket capability = 15`；`PushTaskPayloadKind` 增加 `PUSH_TASK_PAYLOAD_KIND_CAPABILITY = 6`。
   插件实时包（宿主能力 `im.realtime.deliver`）经推送链路只投在线连接，下行为 `DataPacket.capability`，

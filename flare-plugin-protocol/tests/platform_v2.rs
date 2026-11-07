@@ -76,6 +76,7 @@ fn system_tickets_verify_only_as_system_tickets() {
         "a user ticket is not a system ticket"
     );
     let staff = PluginStaffCallClaims {
+        scope: Default::default(),
         tenant_id: "201".into(),
         plugin_id: "flare.poll".into(),
         plugin_version: "0.2.0".into(),
@@ -1106,6 +1107,29 @@ fn the_admin_section_declares_permissions_operations_pages_and_lifecycle() {
 }
 
 #[test]
+fn admin_workspaces_reference_bounded_unique_pages_without_parent_cycles() {
+    let mut raw = admin_manifest();
+    let mut form = raw["admin"]["pages"][0].clone();
+    form["id"] = json!("helper");
+    raw["admin"]["pages"].as_array_mut().unwrap().push(form);
+    raw["admin"]["navigation"][0]["pages"] = json!([
+        {"page":"polls","label":{"zh-CN":"记录"}},
+        {"page":"helper","label":{"zh-CN":"辅助操作"},"placement":"tool","parentPage":"polls"}
+    ]);
+    let manifest = parse(&raw).unwrap();
+    assert_eq!(manifest.admin.unwrap().navigation[0].pages.len(), 2);
+    for pages in [
+        json!([{"page":"missing","label":{"zh-CN":"未知页面"}}]),
+        json!([{"page":"polls","label":{"zh-CN":"记录"}},{"page":"polls","label":{"zh-CN":"重复"}}]),
+        json!([{"page":"polls","label":{"zh-CN":"记录"},"parentPage":"helper"},{"page":"helper","label":{"zh-CN":"辅助"},"parentPage":"polls"}]),
+    ] {
+        let mut bad = raw.clone();
+        bad["admin"]["navigation"][0]["pages"] = pages;
+        assert!(parse(&bad).is_err(), "invalid workspace accepted: {bad}");
+    }
+}
+
+#[test]
 fn staff_tickets_carry_the_admin_permission_of_their_plugin() {
     assert_eq!(
         plugin_permission("flare.poll", "manage").as_deref(),
@@ -1120,6 +1144,7 @@ fn staff_tickets_carry_the_admin_permission_of_their_plugin() {
     assert_eq!(plugin_permission_target("core:plugins:write"), None);
     let signer = PluginCallSigner::new("call-1".into(), [7; 32]).unwrap();
     let staff = |permission: &str| PluginStaffCallClaims {
+        scope: Default::default(),
         tenant_id: "201".into(),
         plugin_id: "flare.poll".into(),
         plugin_version: "0.2.0".into(),

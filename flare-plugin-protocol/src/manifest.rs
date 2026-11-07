@@ -943,6 +943,15 @@ impl PluginManifest {
                     "clientExtensions.actions.command",
                     "durable commands and continuations require a page document",
                 )?;
+                ensure(
+                    action.command.is_none()
+                        || !document.inputs.iter().any(|i| {
+                            action.form.contains(&i.id)
+                                && i.kind == crate::ui::UiInputKind::Password
+                        }),
+                    "clientExtensions.actions.form",
+                    "password inputs cannot enter durable commands",
+                )?;
                 if let Some(command) = &action.command {
                     ensure(
                         command.slot.starts_with(&format!("{}.", self.plugin_id)),

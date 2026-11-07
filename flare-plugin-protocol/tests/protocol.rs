@@ -14,6 +14,7 @@ use serde_json::json;
 fn runtime_empty_snapshot_is_valid_revocation_with_bounded_lease_and_identity() {
     use flare_plugin_protocol::runtime::*;
     let snapshot = PluginRuntimeSnapshot {
+        organization_id: Some("org-1".into()),
         tenant_id: "201".into(),
         version: 9,
         issued_at_ms: 1000,
@@ -28,6 +29,7 @@ fn runtime_empty_snapshot_is_valid_revocation_with_bounded_lease_and_identity() 
     assert!(PluginRuntimeSnapshot::from_json(&bytes, 11000).is_err());
     for bad in [
         PluginRuntimeSnapshot {
+            organization_id: Some("org-1".into()),
             tenant_id: "*".into(),
             ..snapshot.clone()
         },

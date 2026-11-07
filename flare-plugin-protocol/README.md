@@ -63,3 +63,45 @@ Apache-2.0; see the repository LICENSE.
 `serviceOperations` declares private target operations in `user` or `recovery` mode. These cannot also appear in client or staff contributions. A source declares `plugin.service.dispatch` on its originating operation and a mandatory compatible dependency on its target. Core validates both approved grants and policies, routes through operator-owned deployment metadata, reserves its shared invocation budget and signs an independent service ticket over canonical input. Its 30-second lifetime is bounded by both current leases. The target verifies exact operation, request, body, audience, configuration and revision; an opaque admission exposes immutable claims.
 
 User delegation carries the original dedicated Core invocation ticket to Core's bridge, never a user bearer. Recovery carries only the source deployment credential and reaches only explicitly declared recovery operations. It may settle accepted obligations while disabled, but never select a new beneficiary or obtain new spend authority. Service-capable applications need the control plane's short projection renewal cycle. Revoked publisher/version trust fails closed; accepted wallet escrows also have wallet-owned deadline recovery.
+
+
+### Admin workspaces
+
+An `admin.navigation` entry may declare `pages` with independently authorized
+members. Its existing `page` is the preferred landing page and must be included
+among the members. Each member declares `page`, localized `label`, `placement`
+(`tab` or `tool`, default `tab`), and optional `parentPage` for contextual tools.
+References must exist, be unique within and across workspaces, and form no
+parent cycles. The existing page and operation permissions remain authoritative;
+opening a workspace never authorizes any other member or action.
+
+The server filters member pages before choosing an accessible landing page.
+Console role resources keep their original page/action identifiers and add
+workspace labels for grouping. A previously published tenant menu targeting an
+original member page can still resolve to that member. New wallet publication
+offers five workspace roots, while tenant labels, icons, hierarchy and order
+remain tenant-owned. An empty explicit role policy continues to deny access.
+
+
+### Explicit organization management
+
+An admin operation declares `scope: "organization"` when it changes an organization-wide policy;
+ordinary operations default to `application`. One staff permission cannot mix the two scopes.
+An application grant (`plugin:<plugin>:<permission>@<app>`) never grants organization authority;
+the reviewed organization grant is `plugin:<plugin>:<permission>@organization:<organization>`.
+The gateway signs the explicit organization target after checking that grant, Platform rechecks
+fresh IAM authority and Catalog ownership, and Core binds the plugin staff ticket to the same
+owner. Employee `org_id` is membership only. Platform staff must also name an explicit target.
+
+The application remains the reviewed deployment anchor on organization console routes:
+`/apps/<app>/organizations/<organization>/plugins/<plugin>/admin/<permission>/pages/<page>`.
+The standard page, detail and action renderer uses the manifest's scope; no plugin business
+logic lives in Console. `requiresReason` on a detail operation becomes a reason confirmation
+before any protected data is fetched, and the reason is signed into the staff context.
+
+Catalog projects immutable application ownership in `PluginRuntimeSnapshot.organizationId` and
+`PluginTenantState.organization_id`. Runtime assertions bind the app, deployment and owner
+(`flare-plugin-runtime:<deployment>:<organization>`), and the shared runtime store rejects owner
+reassignment across grants or deployments. Admitted user/staff/service contexts expose this
+owner separately from employee membership. Unverified test callers have no owner unless an
+explicit test fixture supplies one.

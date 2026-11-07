@@ -471,6 +471,10 @@ pub enum UiPageCommandMode {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UiPageTransition {
     pub page: String,
+    /// Execute this declared, form-free durable action after the initiating
+    /// operation succeeds. Never executed when a page is read or opened.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin_id: Option<String>,
     #[serde(default)]
@@ -493,7 +497,8 @@ impl UiPageTransition {
         ))
     }
     pub fn validate(&self) -> Result<()> {
-        if self.page.is_empty()
+        if self.action_id.as_deref().is_some_and(|id| !valid_name(id))
+            || self.page.is_empty()
             || self.page.len() > 160
             || !valid_bindings(&self.input)
             || self

@@ -94,6 +94,9 @@ pub struct AdminOperation {
     pub mode: OperationMode,
     /// One of [`PluginAdmin::permissions`]: the staff ticket must carry its code.
     pub permission: String,
+    /// Authority required for this operation. An application grant never grants organization work.
+    #[serde(default, skip_serializing_if = "AdminOperationScope::is_application")]
+    pub scope: AdminOperationScope,
     /// The console asks the staff member for a reason; Core records it in the
     /// audit with the call.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -102,6 +105,19 @@ pub struct AdminOperation {
     /// poll id of a close).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audit_target: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum AdminOperationScope {
+    #[default]
+    Application,
+    Organization,
+}
+impl AdminOperationScope {
+    pub fn is_application(&self) -> bool {
+        *self == Self::Application
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -141,8 +157,37 @@ pub struct AdminNavigation {
     pub order: i32,
     /// One of [`PluginAdmin::pages`].
     pub page: String,
+    /// A workspace's independently authorized pages. Empty keeps a single-page entry.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pages: Vec<AdminNavigationPage>,
     #[serde(default, skip_serializing_if = "AdminAudience::is_tenant")]
     pub audience: AdminAudience,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum AdminNavigationPlacement {
+    #[default]
+    Tab,
+    Tool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AdminNavigationPage {
+    pub page: String,
+    pub label: AdminLabel,
+    #[serde(default)]
+    pub placement: AdminNavigationPlacement,
+    /// Context page whose toolbar offers this auxiliary page; never grants access.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_page: Option<String>,
+}
+
+impl AdminNavigation {
+    pub fn contains_page(&self, page: &str) -> bool {
+        self.page == page || self.pages.iter().any(|member| member.page == page)
+    }
 }
 fn default_order() -> i32 {
     crate::manifest::DEFAULT_UI_ORDER
@@ -449,6 +494,13 @@ impl PluginAdmin {
             "duplicate operation",
         )?;
         for op in &self.operations {
+            ensure(
+                self.operations
+                    .iter()
+                    .filter(|other| other.permission == op.permission)
+                    .all(|other| other.scope == op.scope),
+                "one staff permission cannot mix application and organization authority",
+            )?;
             let declared = manifest
                 .operation(&op.id)
                 .ok_or_else(|| invalid("operation must be a declared capability operation"))?;
@@ -480,8 +532,41 @@ impl PluginAdmin {
                         && n.icon
                             .as_deref()
                             .is_none_or(crate::manifest::is_ui_icon_name)
+                        && n.pages.len() <= MAX_ADMIN_ITEMS
+                        && (n.pages.is_empty() || n.pages.iter().any(|p| p.page == n.page))
+                        && unique(n.pages.iter().map(|p| p.page.as_str()))
+                        && n.pages.iter().all(|p| {
+                            if !label(&p.label) || self.page(&p.page).is_none() {
+                                return false;
+                            }
+                            let mut seen = BTreeSet::from([p.page.as_str()]);
+                            let mut parent = p.parent_page.as_deref();
+                            while let Some(id) = parent {
+                                if !seen.insert(id) {
+                                    return false;
+                                }
+                                let Some(member) = n.pages.iter().find(|member| member.page == id)
+                                else {
+                                    return false;
+                                };
+                                parent = member.parent_page.as_deref();
+                            }
+                            true
+                        })
                 }),
             "invalid navigation",
+        )?;
+        let mut workspace_pages = BTreeSet::new();
+        ensure(
+            self.navigation
+                .iter()
+                .filter(|n| !n.pages.is_empty())
+                .all(|n| {
+                    n.pages
+                        .iter()
+                        .all(|p| workspace_pages.insert(p.page.as_str()))
+                }),
+            "a page belongs to multiple admin workspaces",
         )?;
         ensure(
             unique(self.pages.iter().map(|p| p.id.as_str())),

@@ -167,6 +167,7 @@ fn entity_publication_and_service_dispatch_are_typed_writes() {
 
 fn staff_claims() -> PluginStaffCallClaims {
     PluginStaffCallClaims {
+        scope: Default::default(),
         tenant_id: "201".into(),
         plugin_id: "flare.poll".into(),
         plugin_version: "1.0.0".into(),
@@ -245,10 +246,12 @@ fn staff_tickets_never_verify_as_user_tickets_and_bind_the_admin_permission() {
             ..staff_claims()
         },
         PluginStaffCallClaims {
+            scope: Default::default(),
             tenant_id: "*".into(),
             ..staff_claims()
         },
         PluginStaffCallClaims {
+            scope: Default::default(),
             tenant_id: String::new(),
             ..staff_claims()
         },
@@ -453,4 +456,28 @@ fn client_visible_configuration_is_marked_top_level_and_bounded() {
         with_schema(json!({"type": "object", "properties": {"a": {"type": "string", CLIENT_VISIBLE_KEYWORD: false}}}))
             .is_ok()
     );
+}
+
+#[test]
+fn organization_admin_scope_has_one_canonical_wire_shape() {
+    use flare_plugin_protocol::invocation::PluginAdminScope;
+    let scope = PluginAdminScope::Organization {
+        organization_id: "org-1".into(),
+    };
+    assert_eq!(
+        serde_json::to_value(&scope).unwrap(),
+        serde_json::json!({"kind":"organization","organizationId":"org-1"})
+    );
+    assert!(
+        serde_json::from_value::<PluginAdminScope>(
+            serde_json::json!({"kind":"organization","organization_id":"org-1"})
+        )
+        .is_err()
+    );
+    let mut claims = staff_claims();
+    claims.scope = scope;
+    claims.org_id = Some("other-org".into());
+    assert!(claims.validate(claims.issued_at_ms).is_err());
+    claims.org_id = None;
+    assert!(claims.validate(claims.issued_at_ms).is_ok());
 }

@@ -156,6 +156,9 @@ impl ProjectedPlugin {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PluginRuntimeSnapshot {
     pub tenant_id: String,
+    /// Catalog-owned immutable application owner; never an employee membership or caller input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub organization_id: Option<String>,
     pub version: u64,
     pub issued_at_ms: i64,
     pub valid_until_ms: i64,
@@ -173,6 +176,13 @@ impl PluginRuntimeSnapshot {
     }
     pub fn validate(&self, now_ms: i64) -> Result<()> {
         if self.tenant_id.is_empty()
+            || self.organization_id.as_deref().is_some_and(|id| {
+                id.is_empty()
+                    || id.len() > 128
+                    || !id
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))
+            })
             || self.tenant_id.len() > 32
             || !self
                 .tenant_id

@@ -739,3 +739,27 @@ fn dynamic_selects_resolve_authenticated_directory_choices_and_reject_outside_va
             .is_err()
     );
 }
+
+#[test]
+fn password_fields_have_no_prefill_and_never_enter_durable_commands() {
+    let mut value = page_manifest();
+    let i = page_index(&value, "example.poll.wallet");
+    value["clientExtensions"]["contributions"][i]["schema"]["inputs"] = json!([{"id":"password","kind":"password","label":"Payment password","required":true,"maxLength":6}]);
+    value["clientExtensions"]["contributions"][i]["schema"]["actions"] = json!([{"id":"pay","label":"Pay","form":["password"],"target":{"kind":"operation","operation":"example.poll.transfer"},"continuation":{"pluginId":"example.other","page":"example.other.result","actionId":"commit","input":{"id":"/id"}}}]);
+    assert!(parse(&value).is_ok());
+    for (field, content) in [
+        ("default", json!("123456")),
+        ("defaultPath", json!("/password")),
+    ] {
+        let mut bad = value.clone();
+        bad["clientExtensions"]["contributions"][i]["schema"]["inputs"][0][field] = content;
+        assert!(parse(&bad).is_err());
+    }
+    let mut bad = value.clone();
+    bad["clientExtensions"]["contributions"][i]["schema"]["actions"][0]["command"] =
+        json!({"slot":"example.poll.workflow"});
+    assert!(parse(&bad).is_err());
+    value["clientExtensions"]["contributions"][i]["schema"]["actions"][0]["continuation"]["actionId"] =
+        json!("bad action");
+    assert!(parse(&value).is_err());
+}

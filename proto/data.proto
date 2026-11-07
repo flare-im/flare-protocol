@@ -13,12 +13,21 @@ message CustomData {
 }
 
 message CapabilityPacket {
-  string capability_id = 1;  // plugin id, e.g. example.poll | flare.plugin.catalog
+  string capability_id = 1;  // plugin id, e.g. example.poll
   string packet_type = 2;    // plugin-owned action/type
   string version = 3;
   bytes payload = 4;         // plugin-owned protobuf/JSON bytes
   map<string, string> attributes = 5;
   optional string correlation_id = 6;
+}
+
+// 租户配置变更通知：某个租户（tenant_wide 时为全部租户）的某个配置 topic 前进到 version。
+// Core 只校验格式并保证每个 (租户, topic) 的版本单调，不解释 topic；客户端据此重新读取对应配置。
+message TenantNotice {
+  string topic = 1;      // 小写点分，如 flare.plugin.catalog / social.features
+  uint64 version = 2;    // 该 topic 的版本，单调递增
+  uint32 spread_ms = 3;  // 客户端在 [0, spread_ms] 内随机延迟后再读，避免同一时刻回源
+  bool tenant_wide = 4;  // 平台级变更：发给全部租户的连接
 }
 
 message TypingStatePacket {
@@ -68,5 +77,6 @@ message DataPacket {
     CustomData user_custom = 12;
     CapabilityPacket capability = 13;
     RealtimeControlPacket realtime_control = 14;
+    TenantNotice tenant_notice = 15;
   }
 }
