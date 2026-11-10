@@ -17,9 +17,9 @@
 //! a row. Hiding a block also hides the action it owns. Like every display
 //! condition this is presentation only; plugins still authorize each call.
 use super::{
-    MAX_UI_INPUTS, UiAction, UiActionTarget, UiCondition, UiDetail, UiField, UiInput,
-    UiTranslation, bind_inputs, resolve_action, resolve_fields, scalar_text, translate,
-    valid_field, valid_long_text, valid_name, valid_path, valid_text,
+    MAX_UI_INPUTS, ResolvedUiFormat, UiAction, UiActionTarget, UiCondition, UiDetail, UiField,
+    UiFieldFormat, UiInput, UiTranslation, bind_inputs, resolve_action, resolve_fields,
+    scalar_text, translate, valid_field, valid_long_text, valid_name, valid_path, valid_text,
 };
 use crate::{ProtocolError, Result, tagged::kind_tagged};
 use schemars::JsonSchema;
@@ -57,6 +57,8 @@ pub const DEFAULT_CHOICE_INPUT: &str = "selection";
 pub const ROWS_CURSOR_INPUT: &str = "cursor";
 /// Bytes of a rows cursor.
 pub const MAX_ROWS_CURSOR_BYTES: usize = 256;
+/// Items resolved by a protected media block.
+pub const MAX_UI_PROTECTED_MEDIA: usize = 16;
 
 fn is_default<T: Default + PartialEq>(value: &T) -> bool {
     *value == T::default()
@@ -85,6 +87,9 @@ pub enum UiBlock {
     Note(UiNoteBlock),
     /// Page and admin page (`admin.pages`) documents only.
     Rows(UiRowsBlock),
+    /// Admin page (`admin.pages`) documents only.
+    #[serde(rename = "protected-media")]
+    ProtectedMedia(UiProtectedMediaBlock),
 }
 kind_tagged! {
     UiBlock = "UiBlock" {
@@ -99,6 +104,7 @@ kind_tagged! {
         "divider" => Divider(UiDividerBlock),
         "note" => Note(UiNoteBlock),
         "rows" => Rows(UiRowsBlock),
+        "protected-media" => ProtectedMedia(UiProtectedMediaBlock),
     }
 }
 
@@ -450,6 +456,21 @@ pub struct UiColumn {
     pub values: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "is_default")]
     pub format: UiColumnFormat,
+    /// How the value reads, as for a field; its paths read the row. Takes the
+    /// place of `format` and `values`, which stay at their defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value_format: Option<UiFieldFormat>,
+}
+
+/// How a host draws a rows block. A host that cannot draw cards draws the table.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum UiRowsPresentation {
+    #[default]
+    Table,
+    /// One card per row: the first column is the title, the second the
+    /// description, the others its details, the row actions its control.
+    Cards,
 }
 
 /// A list of rows. On an admin page the host calls `source` with the filter
@@ -489,8 +510,52 @@ pub struct UiRowsBlock {
     /// the row).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value_labels: Option<UiValueLabels>,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub presentation: UiRowsPresentation,
     /// Not shown when any condition matches (`0..=4`). Unlike the row
     /// actions' conditions these read the page (the source result), not a row.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hidden_when: Vec<UiCondition>,
+}
+
+/// Private material a staff member reads one item at a time. Nothing about the
+/// content is in the document: the list names the items, and reading one runs
+/// `action`, an admin operation that requires a stated reason and names its
+/// audit target, so each read is authorized, reasoned and audited like any
+/// other admin action. Admin pages only.
+///
+/// The host asks for the reason, then runs the action with the item id in the
+/// form input `inputName` and the reason in `reasonInput`, when the operation
+/// wants it as input too. `urlPath` reads the action's result: the address the
+/// host fetches for the viewer. A viewer who may not run the action does not
+/// get the block.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UiProtectedMediaBlock {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Array of item objects; at most 16 are resolved.
+    pub items_path: String,
+    /// Inside an item: its stable id (scalar); items without one are skipped.
+    pub id_path: String,
+    /// Inside an item: what the viewer reads it as.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label_path: Option<String>,
+    /// Inside an item: its media type (`image/jpeg`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_type_path: Option<String>,
+    /// Id of a document action with an operation target; the block owns it.
+    pub action: String,
+    /// One of the action's `form` inputs.
+    pub input_name: String,
+    /// One of the action's `form` inputs. Together with `inputName` they are
+    /// all of its form: the host collects nothing else.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason_input: Option<String>,
+    pub url_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub empty_text: Option<String>,
+    /// Not shown when any condition (`0..=4`) matches the resolved data.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hidden_when: Vec<UiCondition>,
 }
@@ -514,6 +579,8 @@ pub enum ResolvedUiBlock {
     Divider(ResolvedUiDivider),
     Note(ResolvedUiNote),
     Rows(ResolvedUiRows),
+    #[serde(rename = "protected-media")]
+    ProtectedMedia(ResolvedUiProtectedMedia),
 }
 kind_tagged! {
     ResolvedUiBlock = "ResolvedUiBlock" {
@@ -528,6 +595,7 @@ kind_tagged! {
         "divider" => Divider(ResolvedUiDivider),
         "note" => Note(ResolvedUiNote),
         "rows" => Rows(ResolvedUiRows),
+        "protected-media" => ProtectedMedia(ResolvedUiProtectedMedia),
     }
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -737,6 +805,34 @@ pub struct ResolvedUiRows {
     /// every input is a filter.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filters: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub presentation: UiRowsPresentation,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResolvedUiProtectedMedia {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub items: Vec<ResolvedUiProtectedItem>,
+    /// The read, absent on a read-only copy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<UiAction>,
+    pub input_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason_input: Option<String>,
+    pub url_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub empty_text: Option<String>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResolvedUiProtectedItem {
+    pub id: String,
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_type: Option<String>,
+    /// The action's declared input, bound from the resolved data.
+    pub input: Value,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -767,6 +863,9 @@ pub struct ResolvedUiCell {
     /// time columns: the instant to format.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub time_ms: Option<i64>,
+    /// What the column's `valueFormat` adds to `text`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<ResolvedUiFormat>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -847,6 +946,7 @@ impl UiBlock {
             Self::Divider(b) => &b.hidden_when,
             Self::Note(b) => &b.hidden_when,
             Self::Rows(b) => &b.hidden_when,
+            Self::ProtectedMedia(b) => &b.hidden_when,
         }
     }
 
@@ -855,6 +955,7 @@ impl UiBlock {
         match self {
             Self::Choices(block) => block.action.as_deref().into_iter().collect(),
             Self::Rows(block) => block.actions.iter().map(String::as_str).collect(),
+            Self::ProtectedMedia(block) => vec![block.action.as_str()],
             _ => Vec::new(),
         }
     }
@@ -964,7 +1065,14 @@ impl UiBlock {
                     && !b.columns.is_empty()
                     && b.columns.len() <= MAX_UI_COLUMNS
                     && b.columns.iter().all(|c| {
-                        valid_text(&c.label) && valid_path(&c.path) && valid_value_labels(&c.values)
+                        valid_text(&c.label)
+                            && valid_path(&c.path)
+                            && valid_value_labels(&c.values)
+                            && c.value_format.as_ref().is_none_or(|format| {
+                                format.is_valid()
+                                    && c.format == UiColumnFormat::Text
+                                    && c.values.is_empty()
+                            })
                     })
                     && optional_path(&b.cursor_path)
                     && b.actions.len() <= MAX_UI_ROW_ACTIONS
@@ -980,6 +1088,25 @@ impl UiBlock {
                             })
                     })
                     && valid_item_labels(&b.value_labels)
+            }
+            Self::ProtectedMedia(b) => {
+                optional_text(&b.label)
+                    && valid_path(&b.items_path)
+                    && valid_path(&b.id_path)
+                    && optional_path(&b.label_path)
+                    && optional_path(&b.media_type_path)
+                    && valid_path(&b.url_path)
+                    && optional_text(&b.empty_text)
+                    && b.reason_input.as_ref() != Some(&b.input_name)
+                    && operation_action(actions, &b.action).is_some_and(|action| {
+                        action.form.contains(&b.input_name)
+                            && action.form.iter().all(|id| {
+                                id == &b.input_name || b.reason_input.as_ref() == Some(id)
+                            })
+                            && b.reason_input
+                                .as_ref()
+                                .is_none_or(|id| action.form.contains(id))
+                    })
             }
         };
         if ok && valid_conditions(self.hidden_when()) {
@@ -1111,6 +1238,7 @@ impl UiBlock {
                 let fields = resolve_fields(
                     &b.fields,
                     scope.data,
+                    scope.translation,
                     |field, _| translate(scope.translation, &field.label),
                     |field, raw| {
                         field
@@ -1189,6 +1317,7 @@ impl UiBlock {
                 tone: b.tone,
             }),
             Self::Rows(b) => ResolvedUiBlock::Rows(b.resolve(scope)?),
+            Self::ProtectedMedia(b) => ResolvedUiBlock::ProtectedMedia(b.resolve(scope)?),
         })
     }
 }
@@ -1436,10 +1565,21 @@ impl UiRowsBlock {
                     .map(|column| {
                         let value = row.pointer(&column.path).filter(|v| !v.is_null());
                         let raw = value.and_then(scalar_text).unwrap_or_default();
+                        if let Some(format) =
+                            column.value_format.as_ref().filter(|_| !raw.is_empty())
+                        {
+                            let (text, format) = format.resolve(row, &raw, scope.translation);
+                            return ResolvedUiCell {
+                                text: text.unwrap_or(raw),
+                                time_ms: None,
+                                format,
+                            };
+                        }
                         match column.format {
                             UiColumnFormat::Time => ResolvedUiCell {
                                 time_ms: value.and_then(as_instant),
                                 text: raw,
+                                format: None,
                             },
                             UiColumnFormat::Text => ResolvedUiCell {
                                 text: column
@@ -1447,6 +1587,7 @@ impl UiRowsBlock {
                                     .get(&raw)
                                     .map_or(raw, |mapped| translate(scope.translation, mapped)),
                                 time_ms: None,
+                                format: None,
                             },
                         }
                     })
@@ -1488,6 +1629,39 @@ impl UiRowsBlock {
                 .collect(),
             empty_text: label(scope, &self.empty_text),
             filters: self.filters.clone(),
+            presentation: self.presentation,
+        })
+    }
+}
+
+impl UiProtectedMediaBlock {
+    fn resolve(&self, scope: &Scope<'_>) -> Option<ResolvedUiProtectedMedia> {
+        let raw = scope.data.pointer(&self.items_path)?.as_array()?;
+        let action = operation_action(scope.actions, &self.action)
+            .filter(|action| visible(action, scope.data, scope.viewer))?;
+        // The declared input reads the record, the same for every item.
+        let input = bind_inputs(&action.input, scope.data).ok()?;
+        let items = raw
+            .iter()
+            .take(MAX_UI_PROTECTED_MEDIA)
+            .filter_map(|item| {
+                let id = non_blank(item.pointer(&self.id_path))?;
+                Some(ResolvedUiProtectedItem {
+                    label: non_blank(at(item, &self.label_path)).unwrap_or_else(|| id.clone()),
+                    media_type: non_blank(at(item, &self.media_type_path)),
+                    input: input.clone(),
+                    id,
+                })
+            })
+            .collect();
+        Some(ResolvedUiProtectedMedia {
+            label: label(scope, &self.label),
+            items,
+            action: Some(resolve_action(action, scope.translation)),
+            input_name: self.input_name.clone(),
+            reason_input: self.reason_input.clone(),
+            url_path: self.url_path.clone(),
+            empty_text: label(scope, &self.empty_text),
         })
     }
 }

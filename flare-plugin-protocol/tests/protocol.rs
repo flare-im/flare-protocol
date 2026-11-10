@@ -13,42 +13,40 @@ use serde_json::json;
 #[test]
 fn runtime_empty_snapshot_is_valid_revocation_with_bounded_lease_and_identity() {
     use flare_plugin_protocol::runtime::*;
-    let snapshot = PluginRuntimeSnapshot {
+    let snapshot = PluginProjection {
         organization_id: Some("org-1".into()),
         tenant_id: "201".into(),
         version: 9,
         issued_at_ms: 1000,
         valid_until_ms: 11000,
         plugins: vec![],
+        bindings: Vec::new(),
     };
     let bytes = serde_json::to_vec(&snapshot).unwrap();
-    assert_eq!(
-        PluginRuntimeSnapshot::from_json(&bytes, 1000).unwrap(),
-        snapshot
-    );
-    assert!(PluginRuntimeSnapshot::from_json(&bytes, 11000).is_err());
+    assert_eq!(PluginProjection::from_json(&bytes, 1000).unwrap(), snapshot);
+    assert!(PluginProjection::from_json(&bytes, 11000).is_err());
     for bad in [
-        PluginRuntimeSnapshot {
+        PluginProjection {
             organization_id: Some("org-1".into()),
             tenant_id: "*".into(),
             ..snapshot.clone()
         },
-        PluginRuntimeSnapshot {
+        PluginProjection {
             version: 0,
             ..snapshot.clone()
         },
-        PluginRuntimeSnapshot {
+        PluginProjection {
             valid_until_ms: 1000 + MAX_PROJECTION_LEASE_MS + 1,
             ..snapshot.clone()
         },
-        PluginRuntimeSnapshot {
+        PluginProjection {
             issued_at_ms: 32000,
             ..snapshot.clone()
         },
     ] {
         assert!(bad.validate(1000).is_err());
     }
-    assert!(PluginRuntimeSnapshot::from_json(&vec![b' '; MAX_SNAPSHOT_BYTES + 1], 1000).is_err());
+    assert!(PluginProjection::from_json(&vec![b' '; MAX_SNAPSHOT_BYTES + 1], 1000).is_err());
     for url in [
         "http://user@localhost:1",
         "https://host/path",
@@ -150,8 +148,26 @@ fn manifest(id: &str, version: &str) -> PluginManifest {
             "id": "run", "inputSchema": {"type": "object"}, "outputSchema": {"type": "object"},
             "permissionIds": ["test.run"], "idempotent": true, "timeoutMs": 1000
         }] }],
-        "permissions": [{ "id": "test.run", "description": "Execute the test operation", "dataScopes": ["test.data"], "riskLevel": "low" }]
+        "permissions": [{ "id": "test.run", "description": "Execute the test operation", "dataScopes": ["test.data"], "riskLevel": "low" }],
+        "features": [{ "id": "run", "label": { "en-US": "Run" }, "gates": { "operations": [format!("{id}.run")] } }]
     })).unwrap()).unwrap()
+}
+
+#[test]
+fn optional_service_dependencies_still_require_a_declared_compatible_target() {
+    let mut source = manifest("source", "1.0.0");
+    source.dependencies.push(PluginDependency {
+        plugin_id: "target".into(),
+        version_range: ">=2.0.0, <3.0.0".into(),
+        optional: true,
+    });
+    assert!(source.requires("target", "2.0.0"));
+    assert!(!source.requires("target", "1.9.9"));
+    assert!(!source.requires("target", "3.0.0"));
+    assert!(!source.requires("undeclared", "2.0.0"));
+    assert!(!source.requires("target", "invalid"));
+    source.dependencies[0].optional = false;
+    assert!(source.requires("target", "2.0.0"));
 }
 
 fn verified(manifest: &PluginManifest) -> VerifiedManifest {
@@ -302,6 +318,7 @@ fn published_versions_are_immutable_and_namespaces_cannot_be_taken_over() {
     ));
     let mut intruder = manifest("test.two", "1.0.0");
     intruder.capabilities[0].id = "test.one.child".into();
+    intruder.features[0].gates.operations = vec!["test.one.child.run".into()];
     assert!(matches!(
         registry.publish(verified(&intruder)),
         Err(ProtocolError::NamespaceConflict(_))
@@ -403,6 +420,7 @@ fn authorization_requires_matching_tenant_version_permission_scope_and_fresh_app
         approved_data_scopes: BTreeSet::from(["test.data".into()]),
         enabled: true,
         revoked: false,
+        suspended: false,
         valid_from_ms: 1,
         valid_until_ms: 100,
     };
@@ -458,6 +476,9 @@ fn authorization_requires_matching_tenant_version_permission_scope_and_fresh_app
     changed = grant.clone();
     changed.approved_data_scopes.clear();
     assert!(changed.authorize(&manifest, &invocation).is_err());
+    changed = grant.clone();
+    changed.suspended = true;
+    assert!(changed.authorize(&manifest, &invocation).is_err());
     assert!(
         grant
             .authorize(
@@ -469,6 +490,63 @@ fn authorization_requires_matching_tenant_version_permission_scope_and_fresh_app
             )
             .is_err()
     );
+}
+
+/// The platform stamps `validFromMs` with its database clock; a host clock 2.85 s behind (seen on
+/// the full stack) must not close a plugin whose projection just changed. Expiry, revocation and a
+/// start beyond the bound stay refused.
+#[test]
+fn authorization_tolerates_bounded_issuer_clock_skew_on_start_only() {
+    use flare_plugin_protocol::authorization::CLOCK_SKEW_MARGIN_MS;
+    let manifest = verified(&manifest("test.plugin", "1.0.0"));
+    let host_now = 1_000_000;
+    let issuer_now = host_now + 2_850;
+    let grant = TenantPluginGrant {
+        grant_id: "grant-1".into(),
+        revision: 2,
+        tenant_id: "tenant-a".into(),
+        plugin_id: "test.plugin".into(),
+        plugin_version: "1.0.0".into(),
+        manifest_digest: manifest.digest().into(),
+        approved_operations: BTreeSet::from(["test.plugin.run".into()]),
+        approved_permissions: BTreeSet::from(["test.run".into()]),
+        approved_data_scopes: BTreeSet::from(["test.data".into()]),
+        enabled: true,
+        revoked: false,
+        suspended: false,
+        valid_from_ms: issuer_now,
+        valid_until_ms: issuer_now + 60_000,
+    };
+    let permissions = BTreeSet::from(["test.run".into()]);
+    let invocation = PluginInvocation {
+        tenant_id: "tenant-a",
+        actor_id: "user-1",
+        operation: "test.plugin.run",
+        actor_permissions: &permissions,
+        platform_enabled: true,
+        now_ms: host_now,
+    };
+    assert!(grant.in_effect(host_now));
+    grant.authorize(&manifest, &invocation).unwrap();
+
+    let mut far = grant.clone();
+    far.valid_from_ms = host_now + CLOCK_SKEW_MARGIN_MS + 1;
+    assert!(!far.in_effect(host_now));
+    assert!(far.authorize(&manifest, &invocation).is_err());
+    far.valid_from_ms = host_now + CLOCK_SKEW_MARGIN_MS;
+    assert!(far.in_effect(host_now));
+
+    let mut expired = grant.clone();
+    expired.valid_until_ms = host_now;
+    assert!(!expired.in_effect(host_now));
+    assert!(expired.authorize(&manifest, &invocation).is_err());
+
+    let mut revoked = grant.clone();
+    revoked.revoked = true;
+    assert!(revoked.authorize(&manifest, &invocation).is_err());
+    let mut disabled = grant.clone();
+    disabled.enabled = false;
+    assert!(disabled.authorize(&manifest, &invocation).is_err());
 }
 
 #[test]

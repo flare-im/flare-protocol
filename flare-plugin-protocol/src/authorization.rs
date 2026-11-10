@@ -5,6 +5,13 @@ use serde::{Deserialize, Serialize};
 use crate::signature::VerifiedManifest;
 use crate::{ProtocolError, Result};
 
+/// How far an issuer's clock may run ahead of the host that checks its timestamps. The platform
+/// stamps a projection with its database clock and Core compares with its own: a start up to this
+/// far in the host's future is already in effect, so a projection change never closes the plugins
+/// it leaves unchanged while the two clocks disagree. Only a start is relaxed; an end, a
+/// revocation and a disable stay exact. The same bound limits how far ahead `issuedAtMs` may be.
+pub const CLOCK_SKEW_MARGIN_MS: i64 = 30_000;
+
 /// A durable approval projection, distinct from tenant enable and emergency
 /// flags. The adapter must verify its control-plane signature before use.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -21,6 +28,9 @@ pub struct TenantPluginGrant {
     pub approved_data_scopes: BTreeSet<String>,
     pub enabled: bool,
     pub revoked: bool,
+    /// Stopped by the platform, whatever the tenant's `enabled` says.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub suspended: bool,
     pub valid_from_ms: i64,
     pub valid_until_ms: i64,
 }
@@ -38,6 +48,13 @@ pub struct PluginInvocation<'a> {
 }
 
 impl TenantPluginGrant {
+    /// Whether the grant's validity window holds at `now_ms` on this host: its start within
+    /// [`CLOCK_SKEW_MARGIN_MS`] of the host clock, its end strictly.
+    pub fn in_effect(&self, now_ms: i64) -> bool {
+        self.valid_from_ms.saturating_sub(CLOCK_SKEW_MARGIN_MS) <= now_ms
+            && now_ms < self.valid_until_ms
+    }
+
     pub fn authorize(
         &self,
         manifest: &VerifiedManifest,
@@ -70,10 +87,10 @@ impl TenantPluginGrant {
         {
             return Err(ProtocolError::Denied("version or manifest mismatch"));
         }
-        if self.revoked || !self.enabled || !invocation.platform_enabled {
+        if self.revoked || self.suspended || !self.enabled || !invocation.platform_enabled {
             return Err(ProtocolError::Denied("plugin disabled or revoked"));
         }
-        if self.valid_from_ms > invocation.now_ms || self.valid_until_ms <= invocation.now_ms {
+        if !self.in_effect(invocation.now_ms) {
             return Err(ProtocolError::Denied(
                 "grant projection outside validity window",
             ));

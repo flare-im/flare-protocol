@@ -19,10 +19,14 @@
 //! ([`UiUnavailableReason`]). Pages add a data source with paging
 //! ([`UiPageSource`]) and rows on page documents; choices take a selection
 //! limit (`maxSelectionsPath`), entries and rows a badge per item
-//! ([`UiValueLabels`]).
+//! ([`UiValueLabels`]). Console pages add, equally optional: field and column
+//! formats ([`UiFieldFormat`]), input references ([`UiReference`]), rows cards
+//! ([`UiRowsPresentation`]) and protected media ([`UiProtectedMediaBlock`]).
 mod blocks;
+mod formats;
 mod inputs;
 pub use blocks::*;
+pub use formats::*;
 pub use inputs::*;
 
 use crate::{
@@ -406,6 +410,9 @@ pub struct UiField {
     /// Display labels for enumerated values (a status shown as words, not as its wire value).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub values: BTreeMap<String, String>,
+    /// How the value reads. The resolved field keeps its plain text either way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<UiFieldFormat>,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -466,6 +473,8 @@ pub enum UiPageCommandMode {
     Submit,
     Retry,
     Acknowledge,
+    /// Query the immutable authenticated intent; never replay its write.
+    Observe,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -653,6 +662,7 @@ pub(crate) fn valid_field(field: &UiField) -> bool {
             .values
             .iter()
             .all(|(value, label)| !value.is_empty() && value.len() <= 64 && valid_text(label))
+        && field.format.as_ref().is_none_or(UiFieldFormat::is_valid)
 }
 fn valid_bindings(input: &BTreeMap<String, String>) -> bool {
     input.len() <= 32
@@ -1037,6 +1047,17 @@ impl UiDocument {
                 return Err(ProtocolError::Denied("invalid UI input"));
             }
         }
+        validate_input_conditions(&self.inputs.iter().collect::<Vec<_>>())?;
+        validate_input_conditions(&self.filter_inputs())?;
+        let known_input = |id: &String| self.inputs.iter().any(|input| &input.id == id);
+        if self.inputs.iter().any(|input| {
+            input
+                .reference
+                .as_ref()
+                .is_some_and(|r| !r.parents.values().all(known_input))
+        }) {
+            return Err(ProtocolError::Denied("invalid UI input"));
+        }
         let mut ids = BTreeSet::new();
         for action in &self.actions {
             if !valid_bindings(&action.input) {
@@ -1058,6 +1079,7 @@ impl UiDocument {
             {
                 return Err(ProtocolError::Denied("invalid UI action form"));
             }
+            validate_input_conditions(&self.form_inputs(action))?;
             if !valid_text(&action.label)
                 || action.command.as_ref().is_some_and(|c| {
                     c.slot.is_empty()
@@ -1074,6 +1096,10 @@ impl UiDocument {
                                     b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_'
                                 })
                         })
+                        || (c.mode == UiPageCommandMode::Observe
+                            && (!action.form.is_empty()
+                                || action.confirm.is_some()
+                                || !c.terminal_error_codes.is_empty()))
                         || !matches!(action.target, UiActionTarget::Operation { .. })
                 })
                 || action.continuation.as_ref().is_some_and(|t| {
@@ -1107,6 +1133,21 @@ impl UiDocument {
             return Err(ProtocolError::Denied("invalid UI action placement"));
         }
         Ok(())
+    }
+    /// The document holds nothing only a console can serve: no protected media
+    /// and no input reference. Clients get neither.
+    pub(crate) fn is_client_surface(&self) -> bool {
+        !self
+            .blocks
+            .iter()
+            .any(|block| matches!(block, UiBlock::ProtectedMedia(_)))
+            && self.inputs.iter().all(|input| input.reference.is_none())
+    }
+    /// Inputs that read a [`UiReference`], in order.
+    pub fn references(&self) -> impl Iterator<Item = (&str, &UiReference)> {
+        self.inputs
+            .iter()
+            .filter_map(|input| Some((input.id.as_str(), input.reference.as_ref()?)))
     }
     /// The rows block, if any (page and admin page documents hold at most one).
     pub fn rows(&self) -> Option<&UiRowsBlock> {
@@ -1218,6 +1259,8 @@ impl UiDocument {
                     operation: rows.source.clone(),
                 })
             }
+            // Without its read a viewer has nothing to do with the block.
+            UiBlock::ProtectedMedia(media) => ids.contains(&media.action),
             _ => true,
         });
         for translation in self.translations.values_mut() {
@@ -1225,6 +1268,11 @@ impl UiDocument {
         }
     }
 }
+/// A plugin as clients read it in the [`UiCatalog`].
+///
+/// New abilities use a new contribution kind; do not add fields to the top
+/// level of this type. A client drops only a contribution it cannot read, but
+/// the whole plugin over one top-level field it does not know.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ClientPlugin {
@@ -1234,6 +1282,10 @@ pub struct ClientPlugin {
     pub grant_revision: u64,
     pub extensions: ClientExtensions,
     pub operations: BTreeSet<String>,
+    /// Authorized operations whose signed descriptor is read-only. Missing
+    /// metadata from an older Core never grants command-observation authority.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub query_operations: BTreeSet<String>,
     /// The client-visible subset of the tenant configuration
     /// ([`crate::PluginManifest::client_visible_configuration`]).
     #[serde(default, skip_serializing_if = "Map::is_empty")]
@@ -1586,6 +1638,7 @@ impl ResolvedPluginView {
             match block {
                 ResolvedUiBlock::Choices(choices) => choices.action = None,
                 ResolvedUiBlock::Entries(entries) => entries.more = false,
+                ResolvedUiBlock::ProtectedMedia(media) => media.action = None,
                 ResolvedUiBlock::Rows(rows) => {
                     rows.actions.clear();
                     for row in &mut rows.rows {
@@ -1603,13 +1656,19 @@ impl ResolvedPluginView {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ResolvedUiField {
     pub label: String,
+    /// The plain text, whatever `format` says: a surface that does not know
+    /// the format draws this.
     pub value: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<ResolvedUiFormat>,
 }
-/// Fields with a value, labels and values mapped by the given rules. A field
-/// without a value is not shown: a card says what it knows, not an empty row.
+/// Fields with a value, labels and values mapped by the given rules, then by
+/// the field's format. A field without a value is not shown: a card says what
+/// it knows, not an empty row.
 pub(crate) fn resolve_fields(
     fields: &[UiField],
     data: &Value,
+    translation: Option<&UiTranslation>,
     label: impl Fn(&UiField, usize) -> String,
     value: impl Fn(&UiField, &str) -> Option<String>,
 ) -> Vec<ResolvedUiField> {
@@ -1621,9 +1680,13 @@ pub(crate) fn resolve_fields(
             if raw.trim().is_empty() {
                 return None;
             }
+            let (text, format) = field.format.as_ref().map_or((None, None), |format| {
+                format.resolve(data, &raw, translation)
+            });
             Some(ResolvedUiField {
                 label: label(field, index),
-                value: value(field, &raw).unwrap_or(raw),
+                value: value(field, &raw).or(text).unwrap_or(raw),
+                format,
             })
         })
         .collect()
@@ -1648,6 +1711,7 @@ pub(crate) fn resolve_document(
     let fields = resolve_fields(
         &document.fields,
         data,
+        translation,
         |field, index| {
             translation
                 .and_then(|t| t.fields.get(index))

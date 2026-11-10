@@ -289,6 +289,21 @@
   },
   "description": "Protocol-only UI v2 acceptance fixture",
   "displayName": "Example Poll",
+  "features": [
+    {
+      "defaultEnabled": true,
+      "description": { "en-US": "Closing it keeps running polls open", "zh-CN": "关闭后已发起的投票不受影响" },
+      "gates": { "contributions": ["example.poll.create"], "operations": ["example.poll.create"] },
+      "id": "create",
+      "label": { "en-US": "Create polls", "zh-CN": "发起投票" },
+      "risk": "low"
+    },
+    {
+      "gates": { "operations": ["example.poll.vote"] },
+      "id": "vote",
+      "label": { "en-US": "Vote", "zh-CN": "投票" }
+    }
+  ],
   "manifestVersion": 1,
   "permissions": [
     { "dataScopes": ["poll.participant"], "description": "Read or answer the example poll", "id": "example.poll.read", "riskLevel": "high" },

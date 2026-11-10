@@ -1001,6 +1001,29 @@ fn admin_manifest() -> Value {
 }
 
 #[test]
+fn admin_documents_cannot_claim_authenticated_client_command_observation() {
+    for mode in ["submit", "retry", "acknowledge"] {
+        let mut value = admin_manifest();
+        value["admin"]["pages"][0]["document"]["actions"][0]["command"] =
+            json!({"slot":"example.poll.workflow","mode":mode});
+        assert!(
+            parse(&value).is_ok(),
+            "existing {mode} declaration is unchanged"
+        );
+    }
+    for target in ["example.poll.remove", "example.poll.list"] {
+        let mut value = admin_manifest();
+        let action = &mut value["admin"]["pages"][0]["document"]["actions"][0];
+        action["target"]["operation"] = json!(target);
+        action["command"] = json!({"slot":"example.poll.workflow","mode":"observe"});
+        assert!(
+            parse(&value).is_err(),
+            "admin hosts have no authenticated client journal"
+        );
+    }
+}
+
+#[test]
 fn the_admin_section_declares_permissions_operations_pages_and_lifecycle() {
     let manifest = parse(&admin_manifest()).unwrap();
     let admin = manifest.admin.as_ref().unwrap();
@@ -1104,6 +1127,75 @@ fn the_admin_section_declares_permissions_operations_pages_and_lifecycle() {
         &|a| a["lifecycle"]["migrations"][0]["from"] = json!("not a range")
     ));
     assert!(reject(&|a| a["extra"] = json!(true)));
+}
+
+#[test]
+fn admin_operations_have_a_separate_bounded_capacity_in_the_contract_and_schema() {
+    let with_operations = |count: usize| {
+        let mut raw = admin_manifest();
+        let template = raw["capabilities"][0]["operations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|operation| operation["id"] == "list")
+            .unwrap()
+            .clone();
+        for index in raw["admin"]["operations"].as_array().unwrap().len()..count {
+            let id = format!("admin_extra_{index}");
+            let mut operation = template.clone();
+            operation["id"] = json!(id);
+            raw["capabilities"][0]["operations"]
+                .as_array_mut()
+                .unwrap()
+                .push(operation);
+            raw["admin"]["operations"].as_array_mut().unwrap().push(
+                json!({"id":format!("example.poll.{id}"),"mode":"query","permission":"read"}),
+            );
+        }
+        raw
+    };
+    assert!(parse(&with_operations(96)).is_ok());
+    assert!(matches!(
+        parse(&with_operations(97)),
+        Err(flare_plugin_protocol::ProtocolError::InvalidManifest { field, reason })
+            if field == "admin" && reason == "too many admin operations"
+    ));
+    let schema = serde_json::to_value(schemars::schema_for!(
+        flare_plugin_protocol::admin::PluginAdmin
+    ))
+    .unwrap();
+    assert_eq!(schema["properties"]["operations"]["maxItems"], 96);
+}
+
+#[test]
+fn admin_permissions_navigation_and_pages_keep_their_existing_capacity() {
+    let schema = serde_json::to_value(schemars::schema_for!(
+        flare_plugin_protocol::admin::PluginAdmin
+    ))
+    .unwrap();
+    for field in ["permissions", "navigation", "pages"] {
+        let mut raw = admin_manifest();
+        let list = raw["admin"][field].as_array_mut().unwrap();
+        let template = list[0].clone();
+        while list.len() < 64 {
+            let mut item = template.clone();
+            item["id"] = json!(format!("limit_{}", list.len()));
+            list.push(item);
+        }
+        assert!(parse(&raw).is_ok(), "64 {field} must remain valid");
+        let mut item = template;
+        item["id"] = json!("limit_64");
+        raw["admin"][field].as_array_mut().unwrap().push(item);
+        assert!(
+            matches!(
+                parse(&raw),
+                Err(flare_plugin_protocol::ProtocolError::InvalidManifest { field: error_field, reason })
+                    if error_field == "admin" && reason == "too many admin items"
+            ),
+            "65 {field} must remain rejected"
+        );
+        assert_eq!(schema["properties"][field]["maxItems"], 64, "{field}");
+    }
 }
 
 #[test]
@@ -1216,6 +1308,7 @@ fn catalog(platforms: Value, unavailable: Value) -> UiCatalog {
         version: 1,
         valid_until_ms: 10_000,
         plugins: vec![ClientPlugin {
+            query_operations: Default::default(),
             operations: manifest.operation_ids(),
             plugin_id: manifest.plugin_id,
             version: manifest.version,

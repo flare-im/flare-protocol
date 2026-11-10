@@ -25,6 +25,7 @@ fn catalog() -> UiCatalog {
         version: 1,
         valid_until_ms: 10000,
         plugins: vec![ClientPlugin {
+            query_operations: Default::default(),
             operations: manifest.operation_ids(),
             plugin_id: manifest.plugin_id,
             version: manifest.version,
@@ -1855,7 +1856,8 @@ fn manifests_without_display_conditions_parse_and_serialize_as_before() {
     // inlined in UiBlock) and on the detail.
     let schema = serde_json::to_value(schemars::schema_for!(PluginManifest)).unwrap();
     let variants = schema["$defs"]["UiBlock"]["oneOf"].as_array().unwrap();
-    assert_eq!(variants.len(), CARD_KINDS.len() + 1);
+    // Every card kind, plus the page-only `rows` and `protected-media`.
+    assert_eq!(variants.len(), CARD_KINDS.len() + 2);
     for variant in variants {
         assert!(
             variant["properties"]["hiddenWhen"].is_object(),

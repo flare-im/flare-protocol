@@ -8,6 +8,7 @@ fn catalog() -> UiCatalog {
         version: 1,
         valid_until_ms: 10000,
         plugins: vec![ClientPlugin {
+            query_operations: Default::default(),
             plugin_id: manifest.plugin_id,
             version: manifest.version,
             manifest_digest: format!("sha256:{}", "a".repeat(64)),

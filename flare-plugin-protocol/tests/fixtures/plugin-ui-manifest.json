@@ -117,6 +117,16 @@
   },
   "description": "Protocol-only UI acceptance fixture",
   "displayName": "Example Poll",
+  "features": [
+    {
+      "gates": {
+        "contributions": ["example.poll.card"],
+        "operations": ["example.poll.vote"]
+      },
+      "id": "vote",
+      "label": { "en-US": "Vote", "zh-CN": "投票" }
+    }
+  ],
   "manifestVersion": 1,
   "permissions": [
     {

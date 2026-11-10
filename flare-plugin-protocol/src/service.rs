@@ -2,7 +2,7 @@
 //! exact payload; a plugin runtime key cannot mint a Core delegation.
 use crate::{
     ProtocolError, Result,
-    runtime::{ProjectedPlugin, digest_bytes},
+    runtime::{ResolvedPlugin, digest_bytes},
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -65,7 +65,7 @@ pub struct ServicePrincipal {
     pub configuration_digest: String,
 }
 impl ServicePrincipal {
-    pub fn projected(p: &ProjectedPlugin) -> Self {
+    pub fn projected(p: &ResolvedPlugin) -> Self {
         Self {
             plugin_id: p.grant.plugin_id.clone(),
             version: p.grant.plugin_version.clone(),
@@ -103,6 +103,9 @@ pub struct PluginServiceClaims {
     pub source: ServicePrincipal,
     pub target: ServicePrincipal,
     pub actor_id: Option<String>,
+    /// Bound by the original user or Core event ticket; absent for recovery.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<String>,
     pub origin_operation: Option<String>,
     pub mode: ServiceMode,
     pub operation: String,
@@ -136,8 +139,13 @@ impl PluginServiceClaims {
                 ServiceMode::User => {
                     self.actor_id.as_ref().is_none_or(|s| !valid_id(s))
                         || self.origin_operation.as_ref().is_none_or(|s| !valid_id(s))
+                        || self.conversation_id.as_ref().is_some_and(|s| !valid_id(s))
                 }
-                ServiceMode::Recovery => self.actor_id.is_some() || self.origin_operation.is_some(),
+                ServiceMode::Recovery => {
+                    self.actor_id.is_some()
+                        || self.origin_operation.is_some()
+                        || self.conversation_id.is_some()
+                }
             }
         {
             return Err(ProtocolError::Denied("invalid service delegation"));
@@ -223,6 +231,7 @@ mod tests {
             source: principal("sender"),
             target: principal("wallet"),
             actor_id: Some("alice".into()),
+            conversation_id: Some("group-1".into()),
             origin_operation: Some("sender.commit".into()),
             mode: ServiceMode::User,
             operation: "wallet.open".into(),
@@ -262,6 +271,7 @@ mod tests {
         assert!(changed.validate(2000).is_err());
         changed.actor_id = None;
         changed.origin_operation = None;
+        changed.conversation_id = None;
         assert!(changed.validate(2000).is_ok());
         changed.target.plugin_id = changed.source.plugin_id.clone();
         assert!(changed.validate(2000).is_err());

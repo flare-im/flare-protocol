@@ -4,9 +4,21 @@ Business-neutral contracts shared by platform control, Core capability routing a
 
 `PluginManifest::from_json` bounds input and validates identifiers, semantic/API versions, operation schemas, permission references, data scopes, dependencies, runtime limits and UI declarations. Unknown fields are rejected. The generated JSON Schema checks structure; semantic validation remains mandatory. Server runtimes require an artifact digest/signature reference; fetching and verifying actual artifact bytes is the runtime's responsibility.
 
+Plugins own their visible names: `displayName` is the default, and optional
+`displayNameI18n` maps locale tags to translated names, for example
+`{"zh-CN": "投票", "en-US": "Poll"}`. It holds at most 16 nonempty names,
+each at most 160 UTF-8 bytes. `localized_display_name` selects the requested
+locale case insensitively, then the same language, then `displayName`.
+Names are presentation only; routing and authorization use `pluginId`.
+An empty translation map is omitted, preserving serialization of existing manifests.
+
 `PublisherTrustStore` verifies detached Ed25519 signatures over exact manifest bytes, binding key id to publisher id. `VerifiedManifest` cannot be constructed by clients without verification. `PluginRegistry` accepts verified manifests, preserves immutable versions, rejects namespace takeovers and resolves version-pinned dependency closures with bounded backtracking. This in-memory domain model requires a platform persistence adapter before online publication.
 
 `TenantPluginGrant` separates approval from tenant enable and platform flags. Authorization requires matching tenant, plugin version and manifest digest, approved operation/permission/data scope, actor permission and a valid projection time window. The receiving adapter must verify the control-plane projection signature and derive actor identity from verified transport. This type is not a substitute for authentication.
+
+A plugin with user operations declares `features`: switches an application publishes separately, with the global key `<pluginId>.<id>`. A feature gates user operations, `user` mode service operations and contributions, which Core closes without touching the plugin process, or one boolean client-visible configuration key, which the plugin enforces. `closed_operations`, `closed_service_operations` and `closed_contributions` answer what a map of feature states closes; a missing key counts as closed. `ProjectedPlugin.features` carries that map and `TenantPluginGrant.suspended` a platform stop, which denies every invocation. `PluginManifest::kind` derives `im` or `business`: an `im.` or `social.` host capability or a message-content contribution makes a plugin `im`. Each contribution may carry a `preview` sample for the marketplace (an object of at most 8 KiB), and `admin.lifecycle.uninstall.check` names the admin `query` the platform calls before uninstalling.
+
+The unit of publication is a package (`crate::package`): a zip with the extension `.fpkg` holding `manifest.json`, `manifest.sig` (`{"keyId", "signature"}`), `assets/` and optional `README.md` and `CHANGELOG.md`. The signature and digest stay those of the exact `manifest.json` bytes, and the manifest's `assets` table holds each asset's path, digest and size, so changing a file fails `PluginPackage::open`. Opening also bounds the package to 32 MiB and refuses unsafe paths, duplicate names, inconsistent zip headers, undeclared files and compressed entries. `write_package` stores sorted entries with fixed metadata, so the same contents give the same bytes.
 
 `PluginLifecycle` models validated start, running, drain, stop and failure with revision fencing. Runtime adapters own effects, health, resource isolation and recovery; lifecycle metadata does not start processes.
 
@@ -35,6 +47,7 @@ Plugin platform v2 (all optional, absent from older manifests):
 - Entity lifecycle: a message-content contribution with `entityPath` may declare `entityLifecycle: {unbound}`, the operation Core calls with a platform system ticket (`PluginSystemCallClaims`, its own signing domain) and `{entity, reason: "recalled" | "post_failed", serverMsgId?}`. `PluginManifest::warnings` reports a bound card without it.
 - Envelope `displayName` (at most 64 bytes, written by the platform when it posts a card) and `ResolvedPluginView.unavailableReason` (`disabled`, `not_installed`, `no_permission`, `unsupported_platform`, `incompatible_version`, `catalog_unreachable`, and `unbound_copy` for a read-only copy, see `ResolvedPluginView::into_read_only`). `UiCatalog.unavailable` lists the tenant's plugins a viewer cannot use, with their reason.
 - Page data: a `page` contribution may declare `source: {operation, input?, cursorPath?}`, a declared query whose result the page document is resolved against (without a source the page resolves against its arguments). A page is opened with arguments, the input the opening action bound (`{}` from an account entry); `input` maps operation inputs to pointers into them, and an argument the pointer does not find is left out (`UiPageSource::bind_input`). Paging follows the detail convention: `nextCursor` from `cursorPath`, the next page is the same input plus `cursor` (`UiPageSource::page_input`), appended with `append_page`. `UiCatalog::page` finds a page or says why it cannot be shown, and `UiContribution::resolve_page` resolves it. Page documents may hold one rows block: its `source` is the page source, it pages with the page (no `cursorPath` of its own), and the values of its filter inputs join the source input; `append_page` appends rows, dropping keys already shown. A page's row actions may open another page (a page target): the row's bound input (`rows[].actions[].input`) is that page's arguments, so a ledger row opens the packet it belongs to. Admin page row actions call admin operations only.
+- Read-only command recovery: a client page action may declare `command: {slot, mode: "observe"}` with a declared `query` target and no form, confirmation or terminal-code override. The SDK reads the original authenticated intent and sends `CommandObservationRequest {commandId, capabilityId, payload}`. `CommandObservation<ObservedCommandResult>` must match that identity and the canonical original-payload digest; its result preserves the original `success` and `data`, including a terminal rejection. `NotFound`, invalid receipts and transport failures leave the intent unknown and unacknowledgeable. Admin documents reject `observe`: they have no authenticated client journal. Core emits the authorized `queryOperations` subset only for plugins offering this mode; absent metadata grants no observation authority.
 - Selection limit: a choices block's `maxSelectionsPath` names a multiple choice's limit (a positive integer, capped at the option count); the resolved block carries `maxSelections`, and `selection_input` refuses a larger selection.
 - Item badges: entries and rows blocks take `valueLabels: {path, values: {value: {label, tone?}}}`, read inside each entry or row; the resolved entry or row carries `badge: {text, tone}`, the label translated through `texts`, an unmapped value shown as sent and neutral.
 - Admin Extension Contract: the top-level `admin` section (`crate::admin::PluginAdmin`) declares staff permissions (granted as `plugin:<pluginId>:<permission>`), admin operations (declared capability operations with the same `mode`, never used by a client contribution), navigation, pages (`list`, `detail`, `form`, `dashboard` with kit whitelisted widgets, resolved with `AdminPage::resolve` and `resolve_detail`), configuration UI hints, events and lifecycle (migrations, uninstall). It is the only console surface: `PluginManifest::admin_operations` and `admin_permission_for` read it alone.
@@ -75,11 +88,18 @@ References must exist, be unique within and across workspaces, and form no
 parent cycles. The existing page and operation permissions remain authoritative;
 opening a workspace never authorizes any other member or action.
 
+The admin contract permits up to 96 operation declarations. Permissions,
+navigation entries, pages and members of one workspace remain limited to 64
+each. Query and command adapters may share the same page and permission;
+their separate operation capacity does not add grants or visible entries.
+The generated schema exposes the operation, permission, navigation and page
+array bounds, and semantic validation also checks all references and authority.
+
 The server filters member pages before choosing an accessible landing page.
 Console role resources keep their original page/action identifiers and add
 workspace labels for grouping. A previously published tenant menu targeting an
-original member page can still resolve to that member. New wallet publication
-offers five workspace roots, while tenant labels, icons, hierarchy and order
+original member page can still resolve to that member. New publication offers
+workspace roots, while tenant labels, icons, hierarchy and order
 remain tenant-owned. An empty explicit role policy continues to deny access.
 
 
@@ -99,7 +119,7 @@ The standard page, detail and action renderer uses the manifest's scope; no plug
 logic lives in Console. `requiresReason` on a detail operation becomes a reason confirmation
 before any protected data is fetched, and the reason is signed into the staff context.
 
-Catalog projects immutable application ownership in `PluginRuntimeSnapshot.organizationId` and
+Catalog projects immutable application ownership in `PluginProjection.organizationId` and
 `PluginTenantState.organization_id`. Runtime assertions bind the app, deployment and owner
 (`flare-plugin-runtime:<deployment>:<organization>`), and the shared runtime store rejects owner
 reassignment across grants or deployments. Admitted user/staff/service contexts expose this

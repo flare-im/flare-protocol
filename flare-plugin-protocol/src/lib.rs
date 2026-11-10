@@ -6,10 +6,11 @@ pub mod authorization;
 pub mod command;
 pub mod configuration;
 pub mod data;
+pub mod event;
 pub mod invocation;
 pub mod lifecycle;
 pub mod manifest;
-pub mod registration;
+pub mod package;
 pub mod registry;
 pub mod resource;
 pub mod runtime;
@@ -18,7 +19,6 @@ pub mod signature;
 pub mod state;
 mod tagged;
 pub mod ui;
-pub mod workload;
 
 pub use manifest::PluginManifest;
 
@@ -32,6 +32,8 @@ pub enum ProtocolError {
     InvalidJson,
     #[error("manifest signature is invalid or publisher key is not trusted")]
     InvalidSignature,
+    #[error("invalid plugin package: {0}")]
+    InvalidPackage(&'static str),
     #[error("plugin version is immutable: {0}")]
     VersionConflict(String),
     #[error("no compatible dependency resolution for {0}")]

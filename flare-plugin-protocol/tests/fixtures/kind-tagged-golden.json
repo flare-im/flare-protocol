@@ -23,10 +23,10 @@
       "value, value ref, array value": "err Data: invalid type: integer `1`, expected variant identifier"
     },
     "array with an unknown kind": {
-      "array str": "err Data: unknown variant `bogus`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows` at line 1 column 9",
+      "array str": "err Data: unknown variant `bogus`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows`, `protected-media` at line 1 column 9",
       "input": "[\"bogus\"]",
-      "str, slice, reader": "err Data: unknown variant `bogus`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows` at line 1 column 8",
-      "value, value ref, array value": "err Data: unknown variant `bogus`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows`"
+      "str, slice, reader": "err Data: unknown variant `bogus`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows`, `protected-media` at line 1 column 8",
+      "value, value ref, array value": "err Data: unknown variant `bogus`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows`, `protected-media`"
     },
     "bool": {
       "array str": "err Data: invalid type: boolean `true`, expected internally tagged enum ResolvedUiBlock at line 1 column 5",
@@ -122,10 +122,10 @@
       "value, value ref, array value": "err Data: invalid type: integer `1`, expected internally tagged enum ResolvedUiBlock"
     },
     "kind in another case": {
-      "array str": "err Data: unknown variant `Text`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows` at line 1 column 15",
+      "array str": "err Data: unknown variant `Text`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows`, `protected-media` at line 1 column 15",
       "input": "{\"kind\":\"Text\"}",
-      "str, slice, reader": "err Data: unknown variant `Text`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows` at line 1 column 14",
-      "value, value ref, array value": "err Data: unknown variant `Text`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows`"
+      "str, slice, reader": "err Data: unknown variant `Text`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows`, `protected-media` at line 1 column 14",
+      "value, value ref, array value": "err Data: unknown variant `Text`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows`, `protected-media`"
     },
     "kind is a bool": {
       "array str": "err Data: invalid type: boolean `true`, expected variant identifier at line 1 column 13",
@@ -287,10 +287,10 @@
       "str, slice, reader, value, value ref, array value": "err Data: unknown field `operation`, expected `page` or `pluginId`"
     },
     "unknown kind": {
-      "array str": "err Data: unknown variant `bogus`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows` at line 1 column 16",
+      "array str": "err Data: unknown variant `bogus`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows`, `protected-media` at line 1 column 16",
       "input": "{\"kind\":\"bogus\"}",
-      "str, slice, reader": "err Data: unknown variant `bogus`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows` at line 1 column 15",
-      "value, value ref, array value": "err Data: unknown variant `bogus`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows`"
+      "str, slice, reader": "err Data: unknown variant `bogus`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows`, `protected-media` at line 1 column 15",
+      "value, value ref, array value": "err Data: unknown variant `bogus`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows`, `protected-media`"
     },
     "unknown nested action target": {
       "array str": "err Data: unknown variant `url`, expected one of `operation`, `page`, `native` at line 1 column 139",
@@ -578,10 +578,10 @@
       "value, value ref, array value": "err Data: invalid type: integer `1`, expected variant identifier"
     },
     "array with an unknown kind": {
-      "array str": "err Data: unknown variant `bogus`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows` at line 1 column 9",
+      "array str": "err Data: unknown variant `bogus`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows`, `protected-media` at line 1 column 9",
       "input": "[\"bogus\"]",
-      "str, slice, reader": "err Data: unknown variant `bogus`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows` at line 1 column 8",
-      "value, value ref, array value": "err Data: unknown variant `bogus`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows`"
+      "str, slice, reader": "err Data: unknown variant `bogus`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows`, `protected-media` at line 1 column 8",
+      "value, value ref, array value": "err Data: unknown variant `bogus`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows`, `protected-media`"
     },
     "bool": {
       "array str": "err Data: invalid type: boolean `true`, expected internally tagged enum UiBlock at line 1 column 5",
@@ -751,10 +751,10 @@
       "str, slice, reader, value, value ref": "ok {\"kind\":\"text\",\"text\":\"Hello\",\"maxLines\":2}"
     },
     "kind in another case": {
-      "array str": "err Data: unknown variant `Text`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows` at line 1 column 15",
+      "array str": "err Data: unknown variant `Text`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows`, `protected-media` at line 1 column 15",
       "input": "{\"kind\":\"Text\"}",
-      "str, slice, reader": "err Data: unknown variant `Text`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows` at line 1 column 14",
-      "value, value ref, array value": "err Data: unknown variant `Text`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows`"
+      "str, slice, reader": "err Data: unknown variant `Text`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows`, `protected-media` at line 1 column 14",
+      "value, value ref, array value": "err Data: unknown variant `Text`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows`, `protected-media`"
     },
     "kind is a bool": {
       "array str": "err Data: invalid type: boolean `true`, expected variant identifier at line 1 column 13",
@@ -808,9 +808,9 @@
       "str, slice, reader, value, value ref, array value": "err Data: invalid value: integer `-1`, expected u8"
     },
     "nested struct as a short array": {
-      "array str": "err Data: invalid length 1, expected struct UiField with 3 elements at line 1 column 41",
+      "array str": "err Data: invalid length 1, expected struct UiField with 4 elements at line 1 column 41",
       "input": "{\"kind\":\"fields\",\"fields\":[[\"Amount\"]]}",
-      "str, slice, reader, value, value ref, array value": "err Data: invalid length 1, expected struct UiField with 3 elements"
+      "str, slice, reader, value, value ref, array value": "err Data: invalid length 1, expected struct UiField with 4 elements"
     },
     "nested struct as an array": {
       "array str, array value": "ok [{\"kind\":\"text\",\"text\":\"a\",\"hiddenWhen\":[{\"path\":\"/a\",\"anyOf\":[\"1\"]}]}]",
@@ -974,10 +974,10 @@
       "value, value ref, array value": "err Data: invalid type: integer `5`, expected a string"
     },
     "unknown kind": {
-      "array str": "err Data: unknown variant `bogus`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows` at line 1 column 16",
+      "array str": "err Data: unknown variant `bogus`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows`, `protected-media` at line 1 column 16",
       "input": "{\"kind\":\"bogus\"}",
-      "str, slice, reader": "err Data: unknown variant `bogus`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows` at line 1 column 15",
-      "value, value ref, array value": "err Data: unknown variant `bogus`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows`"
+      "str, slice, reader": "err Data: unknown variant `bogus`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows`, `protected-media` at line 1 column 15",
+      "value, value ref, array value": "err Data: unknown variant `bogus`, expected one of `text`, `fields`, `choices`, `entries`, `people`, `status`, `progress`, `time`, `divider`, `note`, `rows`, `protected-media`"
     },
     "wrong field type": {
       "array str": "err Data: invalid type: integer `5`, expected a string at line 1 column 26",

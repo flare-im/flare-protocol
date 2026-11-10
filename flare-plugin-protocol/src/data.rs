@@ -1,11 +1,10 @@
-//! Operator data jobs share the existing plugin endpoint, but never user tickets.
-//! The credential audience binds every request field, including offset and fence.
+//! Operator data jobs share the existing plugin endpoint, but never user tickets. Core signs each
+//! call: the ticket's request digest binds every field, including offset and fence.
 use crate::{ProtocolError, Result, runtime::digest_bytes};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub const OPERATION: &str = "flare.plugin.data.v1";
-pub const TOKEN_USE: &str = "plugin_data";
 pub const MAX_CHUNK_BYTES: usize = 64 * 1024;
 pub const MAX_EXPORT_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_REQUEST_BYTES: usize = 96 * 1024;
@@ -124,10 +123,11 @@ impl DataRequest {
         }
         Ok(())
     }
-    pub fn audience(&self) -> Result<String> {
+    /// What Core's data ticket names ([`crate::invocation::PluginDataClaims`]).
+    pub fn digest(&self) -> Result<String> {
         self.validate()?;
         let bytes = serde_json::to_vec(self).map_err(|_| ProtocolError::InvalidJson)?;
-        Ok(format!("flare-plugin-data:{}", digest_bytes(&bytes)))
+        Ok(digest_bytes(&bytes))
     }
 }
 #[cfg(test)]
@@ -145,16 +145,16 @@ mod tests {
             fence: 1,
             action: DataAction::Export,
         };
-        let audience = a.audience().unwrap();
+        let digest = a.digest().unwrap();
         a.fence = 2;
-        assert_ne!(a.audience().unwrap(), audience);
+        assert_ne!(a.digest().unwrap(), digest);
         a.fence = 1;
         a.action = DataAction::Read {
             offset: 0,
             digest: digest_bytes(b"body"),
         };
-        assert_ne!(a.audience().unwrap(), audience);
+        assert_ne!(a.digest().unwrap(), digest);
         a.app_id = "../201".into();
-        assert!(a.audience().is_err());
+        assert!(a.digest().is_err());
     }
 }

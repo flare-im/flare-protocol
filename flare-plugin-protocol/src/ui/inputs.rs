@@ -3,7 +3,7 @@
 //! page (`admin.pages`) are the filters sent to its rows source. The host renders the form,
 //! the core SDK validates it with [`validate_form_values`], and the plugin
 //! re-validates the same rules on its side.
-use super::{UiTranslation, translate, valid_name, valid_path, valid_text};
+use super::{UiReference, UiTranslation, translate, valid_name, valid_path, valid_text};
 use crate::{ProtocolError, Result};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -25,6 +25,10 @@ pub const OPTIONS_MAX_ITEMS: u32 = 50;
 pub const MEMBERS_MAX_ITEMS: u32 = 500;
 /// `select`: most choices.
 pub const SELECT_MAX_CHOICES: usize = 1024;
+/// Plugin form files are bounded independently from action payloads.
+pub const UI_FILE_MAX_BYTES: u64 = 5 * 1024 * 1024;
+pub const UI_FILE_MAX_ACCEPT: usize = 8;
+pub const UI_INPUT_CONDITION_MAX_VALUES: usize = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -50,6 +54,88 @@ pub enum UiInputKind {
     /// Conversation members picked from the list the host provides; value is
     /// an array of user ids, count within `min..=max`. `max: 1` is a single pick.
     Members,
+    /// One completed private plugin upload; value is exactly `{fileId}`.
+    File,
+}
+
+/// A durable reference to a completed upload. URLs, grants and local paths are
+/// transport state and never form values or journal payloads.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UiFileReference {
+    #[schemars(length(min = 1, max = 128))]
+    pub file_id: String,
+}
+impl UiFileReference {
+    pub fn is_valid(&self) -> bool {
+        crate::resource::valid_resource_id(&self.file_id)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UiFileUpload {
+    pub prepare_operation: String,
+    pub complete_operation: String,
+    /// Plugin-owned purpose, pinned by the declaration, never by the form.
+    pub purpose: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UiFileInput {
+    /// Exact MIME types, without wildcards or parameters.
+    #[schemars(length(min = 1, max = UI_FILE_MAX_ACCEPT))]
+    pub accept: Vec<String>,
+    #[schemars(range(min = 1, max = UI_FILE_MAX_BYTES))]
+    pub max_bytes: u64,
+    pub upload: UiFileUpload,
+}
+impl UiFileInput {
+    pub fn is_valid(&self) -> bool {
+        let operation = |s: &str| {
+            !s.is_empty()
+                && s.len() <= 128
+                && s.split('.').all(|part| {
+                    !part.is_empty() && part.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+                })
+        };
+        let mut seen = BTreeSet::new();
+        (1..=UI_FILE_MAX_BYTES).contains(&self.max_bytes)
+            && !self.accept.is_empty()
+            && self.accept.len() <= UI_FILE_MAX_ACCEPT
+            && self
+                .accept
+                .iter()
+                .all(|mime| valid_file_mime(mime) && seen.insert(mime))
+            && operation(&self.upload.prepare_operation)
+            && operation(&self.upload.complete_operation)
+            && self.upload.prepare_operation != self.upload.complete_operation
+            && valid_name(&self.upload.purpose)
+    }
+}
+
+fn valid_file_mime(mime: &str) -> bool {
+    let Some((kind, subtype)) = mime.split_once('/') else {
+        return false;
+    };
+    mime.len() <= 128
+        && !kind.is_empty()
+        && !subtype.is_empty()
+        && [kind, subtype].iter().all(|part| {
+            part.bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"!#$&^_.+-".contains(&b))
+        })
+}
+
+/// Dynamic form visibility reads only an earlier unconditional Select of the
+/// same collected form. Page data and arbitrary expressions are not involved.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UiInputShowWhen {
+    pub field: String,
+    #[schemars(length(min = 1, max = UI_INPUT_CONDITION_MAX_VALUES))]
+    pub any_of: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -100,13 +186,25 @@ pub struct UiInput {
     /// entry); falls back to `default` when absent or of the wrong type.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_path: Option<String>,
-    /// select only: `1..=1024` choices.
+    /// select: `1..=1024` choices. options: `0..=1024`; when present the items
+    /// are picked from them instead of typed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub choices: Vec<UiInputChoice>,
     /// Read bounded select choices from the authenticated source projection.
     /// Removed before rendering; every host consumes the same resolved list.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub choices_path: Option<String>,
+    /// select and options only, instead of `choices`: the host reads the
+    /// choices with the viewer's own permission. Admin pages only. The value
+    /// is checked for shape here; the plugin decides whether it exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference: Option<UiReference>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<UiFileInput>,
+    /// Hosts seed visible defaults once. Every controller value change clears
+    /// all dependants, including uploads still visible under the new value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show_when: Option<UiInputShowWhen>,
 }
 
 /// One problem with a submitted form value.
@@ -187,7 +285,30 @@ impl UiInput {
             || (self.max_length.is_some() && !text_like)
             || ((self.min.is_some() || self.max.is_some()) && !ranged)
             || (self.default.is_some() && self.kind == Members)
-            || (self.choices.is_empty() == (self.kind == Select))
+            || (self.kind == File) != self.file.is_some()
+            || self.file.as_ref().is_some_and(|file| !file.is_valid())
+            || self.show_when.as_ref().is_some_and(|when| {
+                !valid_name(&when.field)
+                    || when.field == self.id
+                    || when.any_of.is_empty()
+                    || when.any_of.len() > UI_INPUT_CONDITION_MAX_VALUES
+                    || when
+                        .any_of
+                        .iter()
+                        .any(|v| v.is_empty() || v.len() > 128 || !single_line(v))
+                    || when.any_of.iter().collect::<BTreeSet<_>>().len() != when.any_of.len()
+            })
+            || (self.kind == Select
+                && self.reference.is_none()
+                && self.choices_path.is_none()
+                && self.choices.is_empty())
+            || (!matches!(self.kind, Select | Options) && !self.choices.is_empty())
+            || self.reference.as_ref().is_some_and(|reference| {
+                !reference.is_valid()
+                    || !matches!(self.kind, Select | Options)
+                    || !self.choices.is_empty()
+                    || self.choices_path.is_some()
+            })
             || self
                 .choices_path
                 .as_deref()
@@ -230,23 +351,12 @@ impl UiInput {
                     || most == 0
                     || most > cap
                     || fewest > most
+                    || !self.valid_choices()
                 {
                     return invalid;
                 }
             }
-            Select => {
-                let mut values = BTreeSet::new();
-                if self.choices.len() > SELECT_MAX_CHOICES
-                    || self.choices.iter().any(|c| {
-                        c.value.is_empty()
-                            || c.value.len() > 128
-                            || !valid_text(&c.label)
-                            || !values.insert(c.value.as_str())
-                    })
-                {
-                    return invalid;
-                }
-            }
+            Select if !self.valid_choices() => return invalid,
             _ => {}
         }
         if self
@@ -259,6 +369,17 @@ impl UiInput {
         Ok(())
     }
 
+    fn valid_choices(&self) -> bool {
+        let mut values = BTreeSet::new();
+        self.choices.len() <= SELECT_MAX_CHOICES
+            && self.choices.iter().all(|c| {
+                !c.value.is_empty()
+                    && c.value.len() <= 128
+                    && valid_text(&c.label)
+                    && values.insert(c.value.as_str())
+            })
+    }
+
     /// Whether `value` is a usable initial value (looser than a submission:
     /// options may hold empty placeholder items, text may be blank).
     fn default_fits(&self, value: &Value) -> bool {
@@ -269,8 +390,10 @@ impl UiInput {
             (Textarea, Value::String(s)) => s.chars().count() <= max && multi_line(s),
             (Number, Value::Number(n)) => self.number_in_range(n),
             (Toggle, Value::Bool(_)) => true,
-            (Select, Value::String(s)) => self.choices.iter().any(|c| &c.value == s),
+            (Select, Value::String(s)) => self.is_choice(s),
             (Datetime, Value::Number(n)) => n.as_i64().is_some_and(|v| v >= 0),
+            (File, Value::Object(_)) => serde_json::from_value::<UiFileReference>(value.clone())
+                .is_ok_and(|file| file.is_valid()),
             (Options, Value::Array(items)) => {
                 items.len() <= self.item_bounds().1 as usize
                     && items.iter().all(|item| {
@@ -280,6 +403,14 @@ impl UiInput {
             }
             _ => false,
         }
+    }
+
+    /// A referenced value cannot be listed here: only its shape is checked.
+    fn is_choice(&self, value: &str) -> bool {
+        if self.reference.is_some() {
+            return !value.is_empty() && value.len() <= 128 && single_line(value);
+        }
+        self.choices.iter().any(|c| c.value == value)
     }
 
     fn number_in_range(&self, n: &Number) -> bool {
@@ -389,7 +520,7 @@ impl UiInput {
             }
             (Toggle, Value::Bool(_)) => Ok(value.clone()),
             (Select, Value::String(s)) => {
-                if self.choices.iter().any(|c| &c.value == s) {
+                if self.is_choice(s) {
                     Ok(value.clone())
                 } else {
                     Err(NotAChoice)
@@ -400,6 +531,11 @@ impl UiInput {
                 Some(_) => Err(OutOfRange),
                 None => Err(InvalidType),
             },
+            (File, Value::Object(_)) => serde_json::from_value::<UiFileReference>(value.clone())
+                .ok()
+                .filter(UiFileReference::is_valid)
+                .map(|_| value.clone())
+                .ok_or(InvalidType),
             (Options | Members, Value::Array(items)) => {
                 let (fewest, most) = self.item_bounds();
                 let mut seen = BTreeSet::new();
@@ -411,6 +547,9 @@ impl UiInput {
                         let trimmed = text.trim();
                         if trimmed.is_empty() || text.chars().count() > max || !single_line(text) {
                             return Err(InvalidItem);
+                        }
+                        if !self.choices.is_empty() && !self.is_choice(text) {
+                            return Err(NotAChoice);
                         }
                         trimmed
                     } else {
@@ -438,6 +577,45 @@ impl UiInput {
     }
 }
 
+/// Validate controller references within a document, action form or filter
+/// scope. Earlier-only, unconditional Select controllers exclude chains/cycles.
+pub fn validate_input_conditions(inputs: &[&UiInput]) -> Result<()> {
+    for (index, input) in inputs.iter().enumerate() {
+        if let Some(when) = &input.show_when {
+            let valid = inputs[..index].iter().any(|controller| {
+                controller.id == when.field
+                    && controller.kind == UiInputKind::Select
+                    && controller.show_when.is_none()
+            });
+            if !valid {
+                return Err(ProtocolError::Denied("invalid UI input condition"));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Determine visibility from the current controller value (or its ordinary
+/// default). Call only on a validated collected form scope.
+pub fn form_input_is_visible(input: &UiInput, inputs: &[&UiInput], values: &Value) -> bool {
+    let Some(when) = &input.show_when else {
+        return true;
+    };
+    let Some(controller) = inputs
+        .iter()
+        .find(|i| i.id == when.field && i.kind == UiInputKind::Select && i.show_when.is_none())
+    else {
+        return false;
+    };
+    values
+        .get(&when.field)
+        .filter(|v| !v.is_null())
+        .or(controller.default.as_ref())
+        .and_then(|value| controller.check(value).ok())
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .is_some_and(|value| when.any_of.contains(&value))
+}
+
 /// Validate the submitted `values` (an object keyed by input id) of `inputs`.
 /// An absent or null value takes the input's `default`; the result holds every
 /// input that has a value, ready to merge into the action input. All problems
@@ -453,6 +631,12 @@ pub fn validate_form_values(
             issue: UiFormIssue::InvalidType,
         }]);
     };
+    if validate_input_conditions(inputs).is_err() {
+        return Err(vec![UiFormError {
+            input: String::new(),
+            issue: UiFormIssue::InvalidType,
+        }]);
+    }
     let mut errors: Vec<UiFormError> = values
         .keys()
         .filter(|key| !inputs.iter().any(|input| &input.id == *key))
@@ -462,11 +646,23 @@ pub fn validate_form_values(
         })
         .collect();
     let mut output = Map::new();
+    let visibility_values = Value::Object(values.clone());
     for input in inputs {
+        if !form_input_is_visible(input, inputs, &visibility_values) {
+            continue;
+        }
         let value = values
             .get(&input.id)
             .filter(|v| !v.is_null())
-            .or(input.default.as_ref());
+            // A conditional default is only an initial host seed. Falling
+            // back here could resurrect an old QR/account after a type change.
+            .or_else(|| {
+                input
+                    .show_when
+                    .is_none()
+                    .then_some(input.default.as_ref())
+                    .flatten()
+            });
         let Some(value) = value else {
             if input.required {
                 errors.push(UiFormError {

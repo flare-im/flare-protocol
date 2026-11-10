@@ -265,6 +265,7 @@ fn catalog(manifest: &PluginManifest) -> UiCatalog {
         version: 1,
         valid_until_ms: 10000,
         plugins: vec![ClientPlugin {
+            query_operations: Default::default(),
             operations: manifest.operation_ids(),
             plugin_id: manifest.plugin_id.clone(),
             version: manifest.version.clone(),
@@ -715,6 +716,40 @@ fn durable_page_commands_and_cross_plugin_continuations_are_bounded_and_page_onl
     value["clientExtensions"]["contributions"][card]["schema"]["actions"] = json!([action]);
     assert!(parse(&value).is_err());
 }
+
+#[test]
+fn observe_page_commands_require_a_declared_query_without_a_new_intent() {
+    let mut value = page_manifest();
+    let i = page_index(&value, "example.poll.wallet");
+    let action = json!({
+        "id":"observe", "label":"Check original operation",
+        "target":{"kind":"operation","operation":"example.poll.wallet"},
+        "command":{"slot":"example.poll.workflow","mode":"observe"}
+    });
+    value["clientExtensions"]["contributions"][i]["schema"]["actions"] = json!([action]);
+    assert!(
+        parse(&value).is_ok(),
+        "a declared read-only observation is valid"
+    );
+    for patch in [
+        json!({"target":{"kind":"operation","operation":"example.poll.transfer"}}),
+        json!({"form":["amount"]}),
+        json!({"confirm":"Create a new operation"}),
+        json!({"command":{"slot":"example.poll.workflow","mode":"observe","terminalErrorCodes":["DECLINED"]}}),
+    ] {
+        let mut bad = value.clone();
+        bad["clientExtensions"]["contributions"][i]["schema"]["inputs"] =
+            json!([{"id":"amount","kind":"text","label":"Amount"}]);
+        let target = bad["clientExtensions"]["contributions"][i]["schema"]["actions"][0]
+            .as_object_mut()
+            .unwrap();
+        target.extend(patch.as_object().unwrap().clone());
+        assert!(
+            parse(&bad).is_err(),
+            "observe cannot collect/replay a new intent: {patch}"
+        );
+    }
+}
 #[test]
 fn dynamic_selects_resolve_authenticated_directory_choices_and_reject_outside_values() {
     let mut value = page_manifest();
@@ -737,6 +772,43 @@ fn dynamic_selects_resolve_authenticated_directory_choices_and_reject_outside_va
         page.schema
             .validate_form_over(&page.schema.actions[0], &data, &json!({"wallet":"foreign"}))
             .is_err()
+    );
+}
+
+#[test]
+fn dynamic_selects_can_start_empty_without_a_fictitious_fallback_value() {
+    let mut value = page_manifest();
+    let i = page_index(&value, "example.poll.wallet");
+    value["clientExtensions"]["contributions"][i]["schema"]["inputs"] = json!([{"id":"wallet","kind":"select","label":"Wallet","required":true,"choicesPath":"/wallets"}]);
+    value["clientExtensions"]["contributions"][i]["schema"]["actions"] = json!([{"id":"transfer","label":"Send","form":["wallet"],"target":{"kind":"operation","operation":"example.poll.transfer"}}]);
+    let manifest = parse(&value).unwrap();
+    let page = &manifest.client_extensions.contributions[i];
+    for data in [
+        json!({}),
+        json!({"wallets":[]}),
+        json!({"wallets":[{"value":"foreign","label":""}]}),
+    ] {
+        let view = page.resolve_page(&data, "en-US", "alice").unwrap();
+        assert!(view.inputs[0].choices.is_empty());
+        assert!(
+            page.schema
+                .validate_form_over(&page.schema.actions[0], &data, &json!({"wallet":"foreign"}))
+                .is_err()
+        );
+    }
+    let data = json!({"wallets":[{"value":"primary","label":"Primary"}]});
+    let view = page.resolve_page(&data, "en-US", "alice").unwrap();
+    assert_eq!(view.inputs[0].choices[0].value, "primary");
+    page.schema
+        .validate_form_over(&page.schema.actions[0], &data, &json!({"wallet":"primary"}))
+        .unwrap();
+    value["clientExtensions"]["contributions"][i]["schema"]["inputs"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("choicesPath");
+    assert!(
+        parse(&value).is_err(),
+        "a static select still requires explicit choices"
     );
 }
 

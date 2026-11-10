@@ -1351,6 +1351,17 @@
   },
   "description": "Normal, lucky and exclusive red packets with independent wallet/escrow/ledger ownership",
   "displayName": "Flare Red Packet",
+  "features": [
+    {
+      "defaultEnabled": true,
+      "gates": {
+        "contributions": ["flare.redpacket.send"],
+        "operations": ["flare.redpacket.create"]
+      },
+      "id": "send",
+      "label": { "en-US": "Send red packets", "zh-CN": "发红包" }
+    }
+  ],
   "manifestVersion": 1,
   "permissions": [
     {

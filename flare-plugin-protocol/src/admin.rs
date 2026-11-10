@@ -37,13 +37,23 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::manifest::{OperationMode, PluginManifest, RiskLevel, UninstallBehavior};
-use crate::ui::{ResolvedPluginView, UiActionTarget, UiDetail, UiDocument, resolve_document};
+use crate::ui::{
+    ResolvedPluginView, UiActionTarget, UiBlock, UiDetail, UiDocument, UiReference,
+    resolve_document,
+};
 use crate::{ProtocolError, Result};
 
 /// The only [`PluginAdmin::contract_version`].
 pub const ADMIN_CONTRACT_VERSION: u32 = 1;
 const MAX_ADMIN_ITEMS: usize = 64;
+// Query and command adapters may share a permission and page. Bound their
+// declarations separately without increasing the visible surface or grants.
+const MAX_ADMIN_OPERATIONS: usize = 96;
 const MAX_ADMIN_LABEL_BYTES: usize = 64;
+/// Bytes of one translation of a configuration field's help.
+const MAX_ADMIN_DESCRIPTION_BYTES: usize = 1000;
+/// Levels of a `uiHints` tree: a top-level property and what it nests.
+const MAX_ADMIN_HINT_DEPTH: u8 = 4;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -52,13 +62,17 @@ pub struct PluginAdmin {
     /// Staff permissions of this plugin, granted as
     /// [`crate::invocation::plugin_permission`] codes
     /// (`plugin:<pluginId>:<id>`).
+    #[schemars(length(max = MAX_ADMIN_ITEMS))]
     pub permissions: Vec<AdminPermission>,
     /// The admin operations, each a declared capability operation that no
     /// client contribution uses.
+    #[schemars(length(max = MAX_ADMIN_OPERATIONS))]
     pub operations: Vec<AdminOperation>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = MAX_ADMIN_ITEMS))]
     pub navigation: Vec<AdminNavigation>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = MAX_ADMIN_ITEMS))]
     pub pages: Vec<AdminPage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settings: Option<AdminSettings>,
@@ -291,6 +305,9 @@ pub struct AdminSettings {
     /// `configurationSchema`, by top-level property.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub ui_hints: BTreeMap<String, AdminUiHint>,
+    /// Headings of the `group` keys the hints use.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub group_labels: BTreeMap<String, AdminLabel>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -308,12 +325,44 @@ pub enum AdminHintWidget {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AdminUiHint {
-    pub widget: AdminHintWidget,
+    /// Absent: the form picks the control from the schema type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub widget: Option<AdminHintWidget>,
+    /// The field's name by locale. Takes the place of the schema `title`,
+    /// which has one language; a locale it does not hold falls back to the
+    /// title.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub label: AdminLabel,
+    /// The field's help by locale, as `label` for the schema `description`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub description: AdminLabel,
+    /// Labels of the schema's enumerated values, by value and locale.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub options: BTreeMap<String, AdminLabel>,
     /// Group key the form puts the field under (`[a-z][a-z0-9_-]{0,31}`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub order: Option<i32>,
+    /// The options of the field, read with the viewer's own permission (see
+    /// [`UiReference`]). `parents` name properties next to the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference: Option<UiReference>,
+    /// Hints of the properties of an object field, or of the items of an
+    /// array of objects.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub fields: BTreeMap<String, AdminUiHint>,
+}
+
+/// Where a [`UiReference`] is declared. A read names it, so a viewer can only
+/// ask for what the manifest declares.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+pub enum AdminReferenceSurface {
+    /// An input of a page document or of its detail document.
+    Page { page: String, input: String },
+    /// A configuration field; nested fields join with `.` (`assets.assetId`).
+    Configuration { field: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -364,6 +413,11 @@ pub struct AdminUninstall {
     /// so tenants can export before and for a while after uninstalling.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub export: bool,
+    /// An admin `query` operation that reports what uninstalling would leave
+    /// behind: `{blockers: [..], warnings: [..]}`. Plugins holding user assets
+    /// or long transactions declare it; the platform calls it first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -407,9 +461,117 @@ fn label(label: &AdminLabel) -> bool {
                 && !text.chars().any(char::is_control)
         })
 }
+/// A translated help text; absent is fine, a present one is as bounded as a label.
+fn description(text: &AdminLabel) -> bool {
+    text.len() <= 16
+        && text.iter().all(|(locale, text)| {
+            !locale.is_empty()
+                && locale.len() <= 32
+                && locale
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                && !text.trim().is_empty()
+                && text.len() <= MAX_ADMIN_DESCRIPTION_BYTES
+        })
+}
 fn unique<'a>(ids: impl IntoIterator<Item = &'a str>) -> bool {
     let mut seen = BTreeSet::new();
     ids.into_iter().all(|id| seen.insert(id))
+}
+/// `schema` with its `$ref` followed and a nullable `anyOf`/`oneOf` opened.
+fn schema_node<'a>(schema: &'a Value, root: &'a Value) -> Option<&'a Value> {
+    let mut node = schema;
+    for _ in 0..MAX_ADMIN_HINT_DEPTH * 2 {
+        if let Some(name) = node
+            .get("$ref")
+            .and_then(Value::as_str)
+            .and_then(|r| r.strip_prefix("#/$defs/"))
+        {
+            node = root.get("$defs")?.get(name)?;
+        } else if let Some(branches) = node
+            .get("anyOf")
+            .or_else(|| node.get("oneOf"))
+            .and_then(Value::as_array)
+        {
+            let mut open = branches
+                .iter()
+                .filter(|b| b.get("type").and_then(Value::as_str) != Some("null"));
+            match (open.next(), open.next()) {
+                (Some(only), None) if only.get("const").is_none() => node = only,
+                _ => return Some(node),
+            }
+        } else {
+            return Some(node);
+        }
+    }
+    None
+}
+/// The properties a hint's `fields` describe: of an object, or of array items.
+fn nested_properties<'a>(
+    schema: &'a Value,
+    root: &'a Value,
+) -> Option<&'a serde_json::Map<String, Value>> {
+    let node = schema_node(schema, root)?;
+    let node = match node.get("items") {
+        Some(items) => schema_node(items, root)?,
+        None => node,
+    };
+    node.get("properties").and_then(Value::as_object)
+}
+fn valid_hints(
+    hints: &BTreeMap<String, AdminUiHint>,
+    properties: Option<&serde_json::Map<String, Value>>,
+    root: &Value,
+    depth: u8,
+) -> bool {
+    hints.len() <= MAX_ADMIN_ITEMS
+        && depth <= MAX_ADMIN_HINT_DEPTH
+        && hints.iter().all(|(key, hint)| {
+            let Some(schema) = properties.and_then(|p| p.get(key)) else {
+                return false;
+            };
+            hint.group.as_deref().is_none_or(segment)
+                && (hint.label.is_empty() || label(&hint.label))
+                && description(&hint.description)
+                && hint.options.len() <= MAX_ADMIN_ITEMS
+                && hint
+                    .options
+                    .iter()
+                    .all(|(value, text)| !value.is_empty() && value.len() <= 64 && label(text))
+                && hint.reference.as_ref().is_none_or(|reference| {
+                    properties
+                        .is_some_and(|p| reference.parents.values().all(|id| p.contains_key(id)))
+                })
+                && (hint.fields.is_empty()
+                    || valid_hints(
+                        &hint.fields,
+                        nested_properties(schema, root),
+                        root,
+                        depth + 1,
+                    ))
+        })
+}
+fn hint_references<'a>(
+    prefix: &str,
+    hints: &'a BTreeMap<String, AdminUiHint>,
+    output: &mut Vec<(AdminReferenceSurface, &'a UiReference)>,
+) {
+    for (key, hint) in hints {
+        let field = if prefix.is_empty() {
+            key.clone()
+        } else {
+            format!("{prefix}.{key}")
+        };
+        if let Some(reference) = &hint.reference {
+            output.push((
+                AdminReferenceSurface::Configuration {
+                    field: field.clone(),
+                },
+                reference,
+            ));
+        }
+        hint_references(&field, &hint.fields, output);
+    }
 }
 fn invalid(reason: &str) -> ProtocolError {
     ProtocolError::InvalidManifest {
@@ -436,6 +598,35 @@ impl PluginAdmin {
     pub fn page(&self, id: &str) -> Option<&AdminPage> {
         self.pages.iter().find(|page| page.id == id)
     }
+    /// Every [`UiReference`] the section declares, with where it is declared.
+    pub fn references(&self) -> Vec<(AdminReferenceSurface, &UiReference)> {
+        let mut output = Vec::new();
+        for page in &self.pages {
+            let documents = std::iter::once(&page.document)
+                .chain(page.detail.as_ref().map(|detail| &detail.document));
+            for document in documents {
+                for (input, reference) in document.references() {
+                    output.push((
+                        AdminReferenceSurface::Page {
+                            page: page.id.clone(),
+                            input: input.to_owned(),
+                        },
+                        reference,
+                    ));
+                }
+            }
+        }
+        if let Some(settings) = &self.settings {
+            hint_references("", &settings.ui_hints, &mut output);
+        }
+        output
+    }
+    /// The reference declared at `surface`.
+    pub fn reference(&self, surface: &AdminReferenceSurface) -> Option<&UiReference> {
+        self.references()
+            .into_iter()
+            .find_map(|(declared, reference)| (&declared == surface).then_some(reference))
+    }
     /// The migration that upgrades an installed `version`, if one declares it.
     pub fn migration_from(&self, version: &semver::Version) -> Option<&AdminMigration> {
         self.lifecycle
@@ -446,7 +637,8 @@ impl PluginAdmin {
     }
 
     /// Everything the manifest alone decides:
-    /// - `contractVersion` is [`ADMIN_CONTRACT_VERSION`]; at most 64 of each list;
+    /// - `contractVersion` is [`ADMIN_CONTRACT_VERSION`]; at most 96 operations
+    ///   and 64 of each other list;
     /// - permissions: unique ids, labels, default roles;
     /// - operations: unique, declared in `capabilities` with the same `mode`,
     ///   a declared permission, `auditTarget` a pointer, and none of them used
@@ -456,11 +648,18 @@ impl PluginAdmin {
     ///   actions, rows source and detail call admin operations only; `list`
     ///   has one rows block, `detail`/`form` none, `dashboard` 1..=12 widgets
     ///   reading admin `query` operations and no rows;
-    /// - `settings.uiHints` keys are top-level `configurationSchema`
-    ///   properties;
+    /// - a protected media block reads through an admin operation that requires
+    ///   a reason and names its audit target;
+    /// - `settings.uiHints` keys are `configurationSchema` properties (`fields`
+    ///   the properties they nest) and their translations are bounded,
+    ///   `groupLabels` keys are group keys with labels;
+    /// - a reference reads an admin `query` operation of this plugin, or names
+    ///   a declared dependency; that the dependency has the operation can only
+    ///   be checked when the plugin is enabled (the platform does);
     /// - `events.emit` are declared manifest events; `subscribe` shape only;
     /// - migrations: a version range `from`, a version `to` not above the
-    ///   manifest version, no duplicate `from`.
+    ///   manifest version, no duplicate `from`;
+    /// - `lifecycle.uninstall.check` is an admin `query` operation.
     pub fn validate(&self, manifest: &PluginManifest) -> Result<()> {
         ensure(
             self.contract_version == ADMIN_CONTRACT_VERSION,
@@ -469,13 +668,16 @@ impl PluginAdmin {
         ensure(
             [
                 self.permissions.len(),
-                self.operations.len(),
                 self.navigation.len(),
                 self.pages.len(),
             ]
             .iter()
             .all(|n| *n <= MAX_ADMIN_ITEMS),
             "too many admin items",
+        )?;
+        ensure(
+            self.operations.len() <= MAX_ADMIN_OPERATIONS,
+            "too many admin operations",
         )?;
         ensure(
             self.permissions.iter().all(|p| {
@@ -594,6 +796,14 @@ impl PluginAdmin {
                 .chain(page.detail.as_ref().map(|detail| &detail.document));
             for document in documents {
                 ensure(
+                    document.actions.iter().all(|action| {
+                        action.command.as_ref().is_none_or(|command| {
+                            command.mode != crate::ui::UiPageCommandMode::Observe
+                        })
+                    }),
+                    "observe requires an authenticated client journal page",
+                )?;
+                ensure(
                     document.actions.iter().all(|a| match &a.target {
                         UiActionTarget::Operation { operation } => admin_ops.contains(operation),
                         _ => false,
@@ -613,6 +823,24 @@ impl PluginAdmin {
                         .all(|input| input.id != crate::ui::ROWS_CURSOR_INPUT),
                     "input id `cursor` is reserved",
                 )?;
+                for block in &document.blocks {
+                    let UiBlock::ProtectedMedia(media) = block else {
+                        continue;
+                    };
+                    let audited = document
+                        .actions
+                        .iter()
+                        .find(|action| action.id == media.action)
+                        .and_then(|action| match &action.target {
+                            UiActionTarget::Operation { operation } => self.operation(operation),
+                            _ => None,
+                        })
+                        .is_some_and(|op| op.requires_reason && op.audit_target.is_some());
+                    ensure(
+                        audited,
+                        "protected media reads through an operation that requires a reason and an audit target",
+                    )?;
+                }
             }
             let rows = page.document.rows_sources().count()
                 + page
@@ -649,13 +877,36 @@ impl PluginAdmin {
                 .as_ref()
                 .and_then(|schema| schema.get("properties"))
                 .and_then(Value::as_object);
+            let root = manifest
+                .configuration_schema
+                .as_ref()
+                .unwrap_or(&Value::Null);
             ensure(
-                settings.ui_hints.iter().all(|(key, hint)| {
-                    properties.is_some_and(|p| p.contains_key(key))
-                        && hint.group.as_deref().is_none_or(segment)
-                }),
+                valid_hints(&settings.ui_hints, properties, root, 1),
                 "uiHints keys must be configurationSchema properties",
             )?;
+            ensure(
+                settings.group_labels.len() <= MAX_ADMIN_ITEMS
+                    && settings
+                        .group_labels
+                        .iter()
+                        .all(|(key, text)| segment(key) && label(text)),
+                "invalid groupLabels",
+            )?;
+        }
+        for (_, reference) in self.references() {
+            ensure(reference.is_valid(), "invalid reference")?;
+            match reference.plugin.as_deref() {
+                None => ensure(
+                    self.operation(&reference.operation)
+                        .is_some_and(|op| op.mode == OperationMode::Query),
+                    "a reference reads an admin query operation",
+                )?,
+                Some(plugin) => ensure(
+                    manifest.dependencies.iter().any(|d| d.plugin_id == plugin),
+                    "a reference names a declared dependency",
+                )?,
+            }
         }
         if let Some(events) = &self.events {
             ensure(
@@ -689,6 +940,17 @@ impl PluginAdmin {
                     && unique(lifecycle.migrations.iter().map(|m| m.from.as_str())),
                 "invalid migrations",
             )?;
+            if let Some(check) = lifecycle
+                .uninstall
+                .as_ref()
+                .and_then(|uninstall| uninstall.check.as_deref())
+            {
+                ensure(
+                    self.operation(check)
+                        .is_some_and(|op| op.mode == OperationMode::Query),
+                    "uninstall check must be an admin query operation",
+                )?;
+            }
         }
         Ok(())
     }
