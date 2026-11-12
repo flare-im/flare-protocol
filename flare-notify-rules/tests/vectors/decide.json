@@ -1,0 +1,669 @@
+{
+  "format": 1,
+  "note": "Decision vectors for flare-notify-rules. Weekday 0 is Monday; minute_of_day is device local time.",
+  "cases": [
+    {
+      "name": "none_class_drops",
+      "input": {
+        "class": "none",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "delay"},
+        "local_time": null,
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "drop"}
+    },
+    {
+      "name": "own_message_drops_even_if_urgent",
+      "input": {
+        "class": "urgent",
+        "mentioned": "no",
+        "from_self": true,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "delay"},
+        "local_time": null,
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "drop"}
+    },
+    {
+      "name": "silent_is_quiet",
+      "input": {
+        "class": "silent",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "delay"},
+        "local_time": null,
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "quiet"}
+    },
+    {
+      "name": "normal_is_candidate",
+      "input": {
+        "class": "normal",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "delay"},
+        "local_time": null,
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "candidate", "priority": false}
+    },
+    {
+      "name": "mention_class_is_priority",
+      "input": {
+        "class": "mention",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "delay"},
+        "local_time": null,
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "candidate", "priority": true}
+    },
+    {
+      "name": "urgent_is_priority",
+      "input": {
+        "class": "urgent",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "delay"},
+        "local_time": null,
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "candidate", "priority": true}
+    },
+    {
+      "name": "normal_named_is_priority",
+      "input": {
+        "class": "normal",
+        "mentioned": "yes",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "delay"},
+        "local_time": null,
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "candidate", "priority": true}
+    },
+    {
+      "name": "normal_unknown_mention_stays_normal",
+      "input": {
+        "class": "normal",
+        "mentioned": "unknown",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "delay"},
+        "local_time": null,
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "candidate", "priority": false}
+    },
+    {
+      "name": "silent_named_stays_quiet",
+      "input": {
+        "class": "silent",
+        "mentioned": "yes",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "delay"},
+        "local_time": null,
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "quiet"}
+    },
+    {
+      "name": "muted_drops_normal",
+      "input": {
+        "class": "normal",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": true, "mention_only": false},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "delay"},
+        "local_time": null,
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "drop"}
+    },
+    {
+      "name": "muted_drops_mention",
+      "input": {
+        "class": "mention",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": true, "mention_only": false},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "delay"},
+        "local_time": null,
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "drop"}
+    },
+    {
+      "name": "muted_drops_silent",
+      "input": {
+        "class": "silent",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": true, "mention_only": false},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "delay"},
+        "local_time": null,
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "drop"}
+    },
+    {
+      "name": "muted_lets_urgent_through_everything",
+      "input": {
+        "class": "urgent",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": true, "mention_only": false},
+        "user": {"quiet_hours": {"start_minute": 1320, "end_minute": 420, "weekdays": 0, "allow_mentions": true}, "preview": "full", "multi_device": "badge_only"},
+        "local_time": {"weekday": 2, "minute_of_day": 1380},
+        "other_device_attentive": true
+      },
+      "expect": {"decision": "candidate", "priority": true}
+    },
+    {
+      "name": "mention_only_drops_unnamed",
+      "input": {
+        "class": "normal",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": true},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "delay"},
+        "local_time": null,
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "drop"}
+    },
+    {
+      "name": "mention_only_drops_unnamed_silent",
+      "input": {
+        "class": "silent",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": true},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "delay"},
+        "local_time": null,
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "drop"}
+    },
+    {
+      "name": "mention_only_keeps_unknown",
+      "input": {
+        "class": "normal",
+        "mentioned": "unknown",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": true},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "delay"},
+        "local_time": null,
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "candidate", "priority": false}
+    },
+    {
+      "name": "mention_only_keeps_unknown_silent_quiet",
+      "input": {
+        "class": "silent",
+        "mentioned": "unknown",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": true},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "delay"},
+        "local_time": null,
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "quiet"}
+    },
+    {
+      "name": "mention_only_keeps_named",
+      "input": {
+        "class": "normal",
+        "mentioned": "yes",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": true},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "delay"},
+        "local_time": null,
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "candidate", "priority": true}
+    },
+    {
+      "name": "mention_only_keeps_mention_class",
+      "input": {
+        "class": "mention",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": true},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "delay"},
+        "local_time": null,
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "candidate", "priority": true}
+    },
+    {
+      "name": "mention_only_keeps_urgent",
+      "input": {
+        "class": "urgent",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": true},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "delay"},
+        "local_time": null,
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "candidate", "priority": true}
+    },
+    {
+      "name": "quiet_hours_normal_is_quiet",
+      "input": {
+        "class": "normal",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": {"start_minute": 1320, "end_minute": 420, "weekdays": 0, "allow_mentions": true}, "preview": "full", "multi_device": "delay"},
+        "local_time": {"weekday": 2, "minute_of_day": 1380},
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "quiet"}
+    },
+    {
+      "name": "quiet_hours_silent_is_quiet",
+      "input": {
+        "class": "silent",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": {"start_minute": 1320, "end_minute": 420, "weekdays": 0, "allow_mentions": true}, "preview": "full", "multi_device": "delay"},
+        "local_time": {"weekday": 2, "minute_of_day": 1380},
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "quiet"}
+    },
+    {
+      "name": "quiet_hours_allowed_mention_is_priority",
+      "input": {
+        "class": "mention",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": {"start_minute": 1320, "end_minute": 420, "weekdays": 0, "allow_mentions": true}, "preview": "full", "multi_device": "delay"},
+        "local_time": {"weekday": 2, "minute_of_day": 1380},
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "candidate", "priority": true}
+    },
+    {
+      "name": "quiet_hours_named_normal_allowed_is_priority",
+      "input": {
+        "class": "normal",
+        "mentioned": "yes",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": {"start_minute": 1320, "end_minute": 420, "weekdays": 0, "allow_mentions": true}, "preview": "full", "multi_device": "delay"},
+        "local_time": {"weekday": 3, "minute_of_day": 419},
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "candidate", "priority": true}
+    },
+    {
+      "name": "quiet_hours_mention_not_allowed_is_quiet",
+      "input": {
+        "class": "mention",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": {"start_minute": 1320, "end_minute": 420, "weekdays": 0, "allow_mentions": false}, "preview": "full", "multi_device": "delay"},
+        "local_time": {"weekday": 2, "minute_of_day": 1380},
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "quiet"}
+    },
+    {
+      "name": "quiet_hours_urgent_is_priority",
+      "input": {
+        "class": "urgent",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": {"start_minute": 1320, "end_minute": 420, "weekdays": 0, "allow_mentions": false}, "preview": "full", "multi_device": "delay"},
+        "local_time": {"weekday": 2, "minute_of_day": 1380},
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "candidate", "priority": true}
+    },
+    {
+      "name": "quiet_hours_before_multi_device",
+      "input": {
+        "class": "normal",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": {"start_minute": 1320, "end_minute": 420, "weekdays": 0, "allow_mentions": true}, "preview": "full", "multi_device": "delay"},
+        "local_time": {"weekday": 2, "minute_of_day": 1380},
+        "other_device_attentive": true
+      },
+      "expect": {"decision": "quiet"}
+    },
+    {
+      "name": "quiet_hours_end_is_exclusive",
+      "input": {
+        "class": "normal",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": {"start_minute": 1320, "end_minute": 420, "weekdays": 0, "allow_mentions": true}, "preview": "full", "multi_device": "delay"},
+        "local_time": {"weekday": 3, "minute_of_day": 420},
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "candidate", "priority": false}
+    },
+    {
+      "name": "quiet_hours_start_is_inclusive",
+      "input": {
+        "class": "normal",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": {"start_minute": 1320, "end_minute": 420, "weekdays": 0, "allow_mentions": true}, "preview": "full", "multi_device": "delay"},
+        "local_time": {"weekday": 3, "minute_of_day": 1320},
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "quiet"}
+    },
+    {
+      "name": "quiet_hours_unknown_local_time",
+      "input": {
+        "class": "normal",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": {"start_minute": 1320, "end_minute": 420, "weekdays": 0, "allow_mentions": true}, "preview": "full", "multi_device": "delay"},
+        "local_time": null,
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "candidate", "priority": false}
+    },
+    {
+      "name": "weeknights_friday_night",
+      "input": {
+        "class": "normal",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": {"start_minute": 1320, "end_minute": 420, "weekdays": 31, "allow_mentions": false}, "preview": "full", "multi_device": "delay"},
+        "local_time": {"weekday": 4, "minute_of_day": 1410},
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "quiet"}
+    },
+    {
+      "name": "weeknights_saturday_early_belongs_to_friday",
+      "input": {
+        "class": "normal",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": {"start_minute": 1320, "end_minute": 420, "weekdays": 31, "allow_mentions": false}, "preview": "full", "multi_device": "delay"},
+        "local_time": {"weekday": 5, "minute_of_day": 419},
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "quiet"}
+    },
+    {
+      "name": "weeknights_sunday_early_belongs_to_saturday",
+      "input": {
+        "class": "normal",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": {"start_minute": 1320, "end_minute": 420, "weekdays": 31, "allow_mentions": false}, "preview": "full", "multi_device": "delay"},
+        "local_time": {"weekday": 6, "minute_of_day": 180},
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "candidate", "priority": false}
+    },
+    {
+      "name": "weeknights_monday_early_belongs_to_sunday",
+      "input": {
+        "class": "normal",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": {"start_minute": 1320, "end_minute": 420, "weekdays": 31, "allow_mentions": false}, "preview": "full", "multi_device": "delay"},
+        "local_time": {"weekday": 0, "minute_of_day": 180},
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "candidate", "priority": false}
+    },
+    {
+      "name": "same_day_window_inside",
+      "input": {
+        "class": "normal",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": {"start_minute": 720, "end_minute": 810, "weekdays": 0, "allow_mentions": false}, "preview": "full", "multi_device": "delay"},
+        "local_time": {"weekday": 1, "minute_of_day": 750},
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "quiet"}
+    },
+    {
+      "name": "same_day_window_after",
+      "input": {
+        "class": "normal",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": {"start_minute": 720, "end_minute": 810, "weekdays": 0, "allow_mentions": false}, "preview": "full", "multi_device": "delay"},
+        "local_time": {"weekday": 1, "minute_of_day": 810},
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "candidate", "priority": false}
+    },
+    {
+      "name": "all_day_on_sunday",
+      "input": {
+        "class": "normal",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": {"start_minute": 0, "end_minute": 0, "weekdays": 64, "allow_mentions": false}, "preview": "full", "multi_device": "delay"},
+        "local_time": {"weekday": 6, "minute_of_day": 900},
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "quiet"}
+    },
+    {
+      "name": "all_day_on_sunday_not_monday",
+      "input": {
+        "class": "normal",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": {"start_minute": 0, "end_minute": 0, "weekdays": 64, "allow_mentions": false}, "preview": "full", "multi_device": "delay"},
+        "local_time": {"weekday": 0, "minute_of_day": 900},
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "candidate", "priority": false}
+    },
+    {
+      "name": "out_of_range_window_is_ignored",
+      "input": {
+        "class": "normal",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": {"start_minute": 1440, "end_minute": 420, "weekdays": 0, "allow_mentions": false}, "preview": "full", "multi_device": "delay"},
+        "local_time": {"weekday": 1, "minute_of_day": 180},
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "candidate", "priority": false}
+    },
+    {
+      "name": "attentive_delay_normal",
+      "input": {
+        "class": "normal",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "delay"},
+        "local_time": null,
+        "other_device_attentive": true
+      },
+      "expect": {"decision": "delay", "delay_ms": 15000, "then": "normal"}
+    },
+    {
+      "name": "attentive_delay_mention",
+      "input": {
+        "class": "mention",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "delay"},
+        "local_time": null,
+        "other_device_attentive": true
+      },
+      "expect": {"decision": "delay", "delay_ms": 15000, "then": "priority"}
+    },
+    {
+      "name": "attentive_delay_named_normal",
+      "input": {
+        "class": "normal",
+        "mentioned": "yes",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "delay"},
+        "local_time": null,
+        "other_device_attentive": true
+      },
+      "expect": {"decision": "delay", "delay_ms": 15000, "then": "priority"}
+    },
+    {
+      "name": "attentive_delay_silent",
+      "input": {
+        "class": "silent",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "delay"},
+        "local_time": null,
+        "other_device_attentive": true
+      },
+      "expect": {"decision": "delay", "delay_ms": 15000, "then": "quiet"}
+    },
+    {
+      "name": "attentive_urgent_never_delayed",
+      "input": {
+        "class": "urgent",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "delay"},
+        "local_time": null,
+        "other_device_attentive": true
+      },
+      "expect": {"decision": "candidate", "priority": true}
+    },
+    {
+      "name": "attentive_immediate_normal",
+      "input": {
+        "class": "normal",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "immediate"},
+        "local_time": null,
+        "other_device_attentive": true
+      },
+      "expect": {"decision": "candidate", "priority": false}
+    },
+    {
+      "name": "attentive_immediate_mention",
+      "input": {
+        "class": "mention",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "immediate"},
+        "local_time": null,
+        "other_device_attentive": true
+      },
+      "expect": {"decision": "candidate", "priority": true}
+    },
+    {
+      "name": "attentive_badge_only_normal",
+      "input": {
+        "class": "normal",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "badge_only"},
+        "local_time": null,
+        "other_device_attentive": true
+      },
+      "expect": {"decision": "badge_only"}
+    },
+    {
+      "name": "attentive_badge_only_mention",
+      "input": {
+        "class": "mention",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "badge_only"},
+        "local_time": null,
+        "other_device_attentive": true
+      },
+      "expect": {"decision": "badge_only"}
+    },
+    {
+      "name": "attentive_badge_only_urgent",
+      "input": {
+        "class": "urgent",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "badge_only"},
+        "local_time": null,
+        "other_device_attentive": true
+      },
+      "expect": {"decision": "candidate", "priority": true}
+    },
+    {
+      "name": "preview_does_not_change_the_decision",
+      "input": {
+        "class": "normal",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": null, "preview": "hidden", "multi_device": "delay"},
+        "local_time": null,
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "candidate", "priority": false}
+    },
+    {
+      "name": "not_attentive_ignores_policy",
+      "input": {
+        "class": "normal",
+        "mentioned": "no",
+        "from_self": false,
+        "conversation": {"muted": false, "mention_only": false},
+        "user": {"quiet_hours": null, "preview": "full", "multi_device": "badge_only"},
+        "local_time": null,
+        "other_device_attentive": false
+      },
+      "expect": {"decision": "candidate", "priority": false}
+    }
+  ]
+}

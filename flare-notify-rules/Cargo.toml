@@ -1,0 +1,23 @@
+[package]
+name = "flare-notify-rules"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94.0"
+license = "Apache-2.0"
+description = "Pure Flare IM notification rules: alert decision, per-conversation coalescing and device budget"
+repository = "https://github.com/flare-im/flare-protocol"
+readme = "README.md"
+keywords = ["instant-messaging", "notification", "push", "rate-limit", "no-std"]
+categories = ["no-std", "algorithms"]
+
+[features]
+default = []
+# 持久化状态（SlotState、DeviceState）的 serde 派生；二进制编码不依赖它。
+serde = ["dep:serde"]
+
+[dependencies]
+serde = { version = "1", default-features = false, features = ["derive"], optional = true }
+
+[dev-dependencies]
+# 回写向量时保留文件里的键序，重写后的文件与手写的输入部分逐字一致。
+serde_json = { version = "1", features = ["preserve_order"] }

@@ -74,6 +74,8 @@ message ConversationSummary {
   uint64 visible_after_conversation_seq = 23;
   /// Only play alerts for messages that mention the current user. Older servers omit this field.
   optional bool is_mention_only = 24;
+  /// 大群里当前用户显式开启了「全部消息通知」（见 ConversationUserSettings.notify_all）。
+  optional bool notify_all = 25;
   map<string, string> attributes = 50;
 }
 
@@ -92,6 +94,41 @@ message ConversationUserSettings {
   bool is_mention_only = 7;
   // Account-wide history cutoff (inclusive). Absent on older servers.
   optional uint64 history_cleared_through_seq = 8;
+  // 超过成员上限的大群默认只推 @我；成员在这个群里显式开启「全部消息通知」时为真，
+  // 进入该会话的通知订阅者，按会话限频的波次推送。小群不看这个字段。
+  bool notify_all = 9;
+}
+
+// 通知预览：离线推送与系统通知里显示多少消息内容。
+enum NotificationPreview {
+  NOTIFICATION_PREVIEW_UNSPECIFIED = 0;  // 按完整预览处理
+  NOTIFICATION_PREVIEW_FULL = 1;         // 发送者与内容
+  NOTIFICATION_PREVIEW_SENDER_ONLY = 2;  // 只显示发送者
+  NOTIFICATION_PREVIEW_HIDDEN = 3;       // 只显示「新消息」
+}
+
+// 同一用户有别的设备正在前台使用时，手机怎么提示。
+enum MultiDeviceAlertPolicy {
+  MULTI_DEVICE_ALERT_POLICY_UNSPECIFIED = 0;  // 按延迟处理
+  MULTI_DEVICE_ALERT_POLICY_DELAY = 1;        // 延迟一段时间，期间在别的设备上读了就不再提示
+  MULTI_DEVICE_ALERT_POLICY_IMMEDIATE = 2;    // 立即提示
+  MULTI_DEVICE_ALERT_POLICY_BADGE_ONLY = 3;   // 不提示，只更新角标
+}
+
+// 勿扰时段，按设备当地时间计算。start 等于 end 表示全天。跨零点时 end 小于 start。
+message QuietHours {
+  uint32 start_minute = 1;  // 0..1439
+  uint32 end_minute = 2;    // 0..1439
+  uint32 weekdays = 3;      // 按位：bit0 周一 … bit6 周日；0 表示每天
+  bool allow_mentions = 4;  // 点名到我的消息照常响铃
+}
+
+// 用户级通知设置，跨会话、跨设备。归核心所有（与产品无关）。
+message UserNotificationSettings {
+  optional QuietHours quiet_hours = 1;  // 缺省表示没有勿扰时段
+  NotificationPreview preview = 2;
+  MultiDeviceAlertPolicy multi_device = 3;
+  uint64 settings_version = 4;
 }
 
 message ConversationParticipant {

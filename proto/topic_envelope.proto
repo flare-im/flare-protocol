@@ -6,6 +6,7 @@ import "data.proto";
 import "event.proto";
 import "errors.proto";
 import "message.proto";
+import "conversation.proto";
 
 // MQ 信封。主 Topic 分区键 conversation_id；payload 为 Message 或 Event；trace/tenant 走 MQ 头或 Ctx。
 
@@ -49,6 +50,27 @@ enum PushTaskPayloadKind {
   PUSH_TASK_PAYLOAD_KIND_CAPABILITY = 6;
 }
 
+// 提示等级：一条消息或事件值不值得打扰接收者。由服务端分类器给出。
+enum AlertClass {
+  ALERT_CLASS_UNSPECIFIED = 0;
+  ALERT_CLASS_NONE = 1;     // 不提示、不计数：已读回执、输入中、表情回应、编辑
+  ALERT_CLASS_SILENT = 2;   // 更新通知内容与角标，不响铃
+  ALERT_CLASS_NORMAL = 3;   // 普通消息
+  ALERT_CLASS_MENTION = 4;  // 点名到接收者，或 @所有人
+  ALERT_CLASS_URGENT = 5;   // 绕过免打扰与预算，受发送方配额限制
+}
+
+// 推送处置：这条离线任务在设备上要产生什么效果。
+enum PushDisposition {
+  PUSH_DISPOSITION_UNSPECIFIED = 0;
+  PUSH_DISPOSITION_LOUD = 1;            // 展示并响铃
+  PUSH_DISPOSITION_QUIET = 2;           // 覆盖同一合并键的通知，不响铃
+  PUSH_DISPOSITION_CLEAR = 3;           // 清除同一合并键的通知
+  PUSH_DISPOSITION_BADGE_ONLY = 4;      // 只更新角标
+  PUSH_DISPOSITION_RECALL_REPLACE = 5;  // 用撤回文案覆盖同一合并键的通知，不响铃
+  PUSH_DISPOSITION_DIGEST = 6;          // 摘要通知
+}
+
 message PushTaskEnvelope {
   string user_id = 1;
   string message_id = 2;
@@ -59,6 +81,48 @@ message PushTaskEnvelope {
   bytes push_payload = 7;
   map<string, string> headers = 8;
   PushTaskPayloadKind payload_kind = 9;
+
+  // 以下字段只有离线任务填写；在线任务（按会话或按用户广播）保持为空。
+  string device_id = 10;             // 目标设备：离线任务按设备发，只投给这台设备的推送绑定
+  string collapse_key = 11;          // 合并键：同一键的通知在设备上互相覆盖（一个会话一条）
+  string thread_key = 12;            // 分组键：系统通知中心按它归组
+  PushDisposition disposition = 13;
+  AlertClass alert_class = 14;
+  uint32 count = 15;                 // 这条通知代表的未读条数；0 与 1 都表示单条
+  optional uint32 badge = 16;        // 角标绝对值；缺省表示不改角标
+  uint64 conversation_seq = 17;      // 所代表的最新消息的会话 seq；端上只接受更大的值
+  string idempotency_key = 18;       // 稳定的幂等键，同时作为 broker 的消息标识
+  NotificationPreview preview = 19;  // 接收者的通知预览设置，worker 据此决定文案露出多少
+  uint32 digest_conversations = 20;  // 摘要通知代表的会话数（disposition 为 DIGEST 时）
+}
+
+// 设备交接：一台设备从「链路负责提示」转为「推送通道负责提示」。
+enum DeviceHandoffCause {
+  DEVICE_HANDOFF_CAUSE_UNSPECIFIED = 0;
+  DEVICE_HANDOFF_CAUSE_PARKED = 1;        // 客户端主动托管；确认之后才到的帧列在 pending 里
+  DEVICE_HANDOFF_CAUSE_ACK_TIMEOUT = 2;   // 送达确认超时，或连接已被标为可疑
+  DEVICE_HANDOFF_CAUSE_LINK_LOST = 3;     // 连接断开时仍有未确认的帧
+  DEVICE_HANDOFF_CAUSE_GATEWAY_LOST = 4;  // 网关失联，pending 为空，由 since 起的变更决定补提示范围
+}
+
+message DeviceHandoffItem {
+  string conversation_id = 1;
+  uint64 seq = 2;          // 会话 seq
+  string message_id = 3;   // 服务端消息 ID
+}
+
+// 发布到 flare.im.push.handoff，分区键为 user_id。push-server 据此对 pending 做一次补提示：
+// 按会话合并，每个会话取最新一条渲染，走与正常离线推送相同的偏好过滤。
+message DeviceHandoff {
+  string tenant_id = 1;
+  string user_id = 2;
+  string device_id = 3;
+  string connection_id = 4;
+  string gateway_id = 5;
+  DeviceHandoffCause cause = 6;
+  int64 since = 7;          // GATEWAY_LOST：网关租约最后可见时间，Unix epoch millis
+  int64 occurred_at = 8;    // Unix epoch millis
+  repeated DeviceHandoffItem pending = 9;
 }
 
 // Versioned, authenticated broker record. This is a NEW wire format: never put it

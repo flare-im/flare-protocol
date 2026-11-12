@@ -27,6 +27,30 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
 
+  # 提示规则由推送服务端与客户端引擎共用，引擎会把它编进 wasm：
+  # 不只是测试要过，wasm 目标也要能编（no_std 与 alloc 的边界一碰就坏）。
+  notify-rules:
+    name: Notification rules
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: flare-notify-rules
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: flare-notify-rules
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo test
+      - run: cargo test --features serde
+      - run: cargo check --target wasm32-unknown-unknown
+      - run: cargo check --target wasm32-unknown-unknown --features serde
+
   check:
     name: fmt / clippy / test
     runs-on: ubuntu-latest

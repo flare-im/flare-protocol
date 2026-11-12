@@ -64,6 +64,41 @@ enum DevicePriority {
   DEVICE_PRIORITY_CRITICAL = 4; /// 强制推送、忽略免打扰
 }
 
+// 设备应用状态。客户端经传输层 DEVICE_STATE 系统命令上报，服务端据此决定新消息的提示
+// 由这条链路负责还是交给推送通道。
+enum DeviceAppState {
+  DEVICE_APP_STATE_UNSPECIFIED = 0;
+  DEVICE_APP_STATE_ACTIVE = 1;   /// 前台：核心在应用内提示
+  DEVICE_APP_STATE_STANDBY = 2;  /// 后台、链路保留、本进程能自己发系统通知：送达确认超时则转推送
+  DEVICE_APP_STATE_PARKING = 3;  /// 即将被挂起：从服务端确认起，提示交给推送通道，客户端随后关闭链路
+  /// 后台、链路保留、但本进程不能自己提示（手机还没有后台展示器）：消息照常经链路下发，
+  /// 提示由推送通道负责，服务端在路由时直接推送，不等送达确认。
+  DEVICE_APP_STATE_DEFERRED = 4;
+}
+
+// 用户注意力。别的设备处于 ACTIVE 且 ATTENTIVE 时，手机推送可以延迟并在已读后取消。
+enum DeviceAttention {
+  DEVICE_ATTENTION_UNSPECIFIED = 0;
+  DEVICE_ATTENTION_ATTENTIVE = 1; /// 有输入焦点且近期有操作
+  DEVICE_ATTENTION_IDLE = 2;      /// 窗口在前台但一段时间没有操作
+}
+
+/// DEVICE_STATE 系统命令的载荷（客户端 → 服务端）。
+message DeviceStateReport {
+  DeviceAppState state = 1;
+  DeviceAttention attention = 2;
+  uint32 badge = 3;        /// 设备当前的未读总数，作为服务端角标的基线
+  int64 reported_at = 4;   /// 设备上报时间，Unix epoch millis；只用于诊断，服务端决策不依赖设备时钟
+}
+
+/// DEVICE_STATE_ACK 系统命令的载荷（服务端 → 客户端）。
+/// 同一条连接上帧按写出顺序到达：客户端收到它时，服务端在此之前写出的帧都已到达。
+/// state 为 PARKING 时，服务端此后不再向这条连接写需要提示的帧。
+message DeviceStateAck {
+  DeviceAppState state = 1;  /// 服务端已生效的状态
+  int64 server_time = 2;     /// Unix epoch millis
+}
+
 /// 连接质量（跨机房/选端可选参考）
 message ConnectionQuality {
   int64 rtt_ms = 1;

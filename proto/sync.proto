@@ -191,6 +191,9 @@ message Sync {
     // 显式建群：客户端在 get_group_by_user_ids 时一次性把成员表交给服务端建群，
     // 之后消息不再携带整张成员表（避免超大群建群首条消息超 NATS 单消息上限）。
     EnsureConversationSync ensure_conversation = 25;
+    // 当前用户的用户级通知设置（勿扰时段、通知预览、多端提示策略）：部分更新与读取。
+    UserNotificationSettingsSync user_notification_settings = 26;
+    GetUserNotificationSettingsSync get_user_notification_settings = 27;
   }
 }
 
@@ -268,7 +271,26 @@ message ConversationUserSettingsSync {
   optional string draft = 5;
   uint64 base_settings_version = 6;
   optional uint64 clear_history_through_seq = 7;
+  /// 大群里显式开启「全部消息通知」（见 ConversationUserSettings.notify_all）。改了这一项时，
+  /// 其余在线设备会收到 UserSettingsChanged 信号。
+  optional bool notify_all = 8;
 }
+
+/// 部分更新当前用户的用户级通知设置：没带的项保持不变，至少要带一项。
+/// 成功后其余在线设备会收到 UserSettingsChanged 信号（conversation_id 为空）。
+message UserNotificationSettingsSync {
+  /// 设置勿扰时段，整体替换。分钟取 0..1439，weekdays 不超过 0x7F。
+  optional QuietHours quiet_hours = 1;
+  /// 取消勿扰时段。与 quiet_hours 同时出现时拒绝。
+  bool clear_quiet_hours = 2;
+  optional NotificationPreview preview = 3;
+  optional MultiDeviceAlertPolicy multi_device = 4;
+  /// 客户端已知的 settings_version；0 表示不校验。不一致时整次写入被拒绝，客户端重新读取后再改。
+  uint64 base_settings_version = 5;
+}
+
+/// 读当前用户的用户级通知设置。从没设置过的用户得到默认值，settings_version 为 0。
+message GetUserNotificationSettingsSync {}
 
 // -----------------------------------------------------------------------------
 // 下行：SyncRes
@@ -291,6 +313,8 @@ message SyncRes {
     ConversationParticipantsSyncRes conversation_participants = 23;
     ConversationUserSettingsSyncRes conversation_user_settings = 24;
     EnsureConversationSyncRes ensure_conversation = 25;
+    UserNotificationSettingsSyncRes user_notification_settings = 26;
+    GetUserNotificationSettingsSyncRes get_user_notification_settings = 27;
   }
 }
 
@@ -350,6 +374,36 @@ message UpdateSyncCursorSyncRes {
 
 message ConversationUserSettingsSyncRes {
   ConversationUserSettings settings = 1;
+}
+
+/// 写入后的完整设置（含新的 settings_version）。
+message UserNotificationSettingsSyncRes {
+  UserNotificationSettings settings = 1;
+}
+
+message GetUserNotificationSettingsSyncRes {
+  UserNotificationSettings settings = 1;
+}
+
+/// 用户设置变更信号：某台设备经同步通道改了设置之后，服务端告诉该用户其余在线设备去重新读取。
+///
+/// 承载：一帧 DataPacket.realtime_control，conversation_id 是该用户自己的 sync 收件箱
+/// `sync:<user_id>`，control_type 为 "custom"，payload.custom.type 为
+/// "flare.user_settings_changed"，payload.custom.payload 是本消息的编码。改设置的那条连接不会
+/// 收到（它已经拿到写入结果）。客户端发往 `sync:` 收件箱的实时帧一律被网关丢弃，所以收件箱上的
+/// 这一帧只可能来自服务端。
+///
+/// 只在线、尽力而为、不落库、不占 seq：离线或错过的设备在下次连上时照常读取设置。它只是「去读一次」
+/// 的提示，本地 settings_version 不低于这里的值时可以忽略，设置内容以读取结果为准。
+message UserSettingsChanged {
+  /// 为空：用户级通知设置变了，用 GetUserNotificationSettingsSync 重新读取。
+  /// 非空：该会话上的个人设置变了（目前只有 notify_all 的修改发信号），新值在 notify_all。
+  string conversation_id = 1;
+  /// 变更后的版本：用户级通知设置的 settings_version，或该会话 ConversationUserSettings 的
+  /// settings_version。
+  uint64 settings_version = 2;
+  /// conversation_id 非空时：该会话 notify_all 的新值。
+  bool notify_all = 3;
 }
 
 /// 显式建群请求：携带完整成员表，服务端据此创建/确保会话存在（幂等）。
